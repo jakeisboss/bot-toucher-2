@@ -1,8 +1,8 @@
 {
   "Version": "0.1.0",
   "PublishRelease": true,
-  "ReviewedSourceCommit": "b418643d9032f418c9cdb3c3c9d52ae53afe2fe3",
+  "ReviewedSourceCommit": "70c970d52d88346e2493fad2a2cd6bbc32198d78",
   "Scope": "One explicit targeted Windows validation and gated GitHub Release publication; no widget/packet/execution work.",
-  "Attempt": 4,
-  "Reason": "Confirm bounded native sharing/lock read handling, then actual transactions and gated publication."
+  "Attempt": 5,
+  "Reason": "Quote MSBuild version arguments passed through PowerShell wrappers; retain green native tests and run actual transactions/publication."
 }

@@ -14,8 +14,11 @@ $testRoot = Join-Path ([System.IO.Path]::GetTempPath()) ('BT2-update-proof-' + [
 $installRoot = Join-Path $testRoot 'installed'
 New-Item -ItemType Directory $testRoot | Out-Null
 function Run-DotNet {
-    & dotnet @args
-    if ($LASTEXITCODE -ne 0) { throw "dotnet failed: $args" }
+    $PSNativeCommandUseErrorActionPreference = $false
+    $lines = @(& dotnet @args 2>&1)
+    $result = $LASTEXITCODE
+    $lines | ForEach-Object { Write-Host $_ }
+    if ($result -ne 0) { throw ("dotnet failed: $args`n" + (($lines | Select-Object -Last 60) -join "`n")) }
 }
 function Run-Updater {
     & $script:seedUpdater @args --root $script:installRoot
@@ -104,8 +107,8 @@ try {
     Run-DotNet test tests/BotToucher2.Update.Tests -c Release --filter 'FullyQualifiedName~Status'
     foreach ($version in @('0.1.0','0.1.1','0.1.2')) {
         $folder = Join-Path $testRoot $version
-        Run-DotNet publish src/BotToucher2.App -c Release -r win-x64 --self-contained true -p:Version=$version -o (Join-Path $folder 'app')
-        Run-DotNet publish src/BotToucher2.Updater -c Release -r win-x64 --self-contained true -p:Version=$version -o (Join-Path $folder 'engine')
+        Run-DotNet publish src/BotToucher2.App -c Release -r win-x64 --self-contained true "-p:Version=$version" -o (Join-Path $folder 'app')
+        Run-DotNet publish src/BotToucher2.Updater -c Release -r win-x64 --self-contained true "-p:Version=$version" -o (Join-Path $folder 'engine')
         [System.IO.File]::WriteAllText((Join-Path $folder 'app/proof.txt'), $version)
     }
     $script:seedUpdater = Join-Path $testRoot '0.1.0/engine/BotToucher2.Updater.exe'

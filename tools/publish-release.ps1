@@ -12,10 +12,16 @@ trap {
 }
 Set-Location (Join-Path $PSScriptRoot '..')
 if ($Version -notmatch '^0\.1\.[0-9]+$') { throw 'This release script is limited to approved 0.1 versions' }
-function Run-DotNet { & dotnet @args; if ($LASTEXITCODE -ne 0) { throw "dotnet failed: $args" } }
+function Run-DotNet {
+    $PSNativeCommandUseErrorActionPreference = $false
+    $lines = @(& dotnet @args 2>&1)
+    $result = $LASTEXITCODE
+    $lines | ForEach-Object { Write-Host $_ }
+    if ($result -ne 0) { throw ("dotnet failed: $args`n" + (($lines | Select-Object -Last 60) -join "`n")) }
+}
 $output = Join-Path (Get-Location) ('artifacts/release-' + $Version + '-' + [Guid]::NewGuid().ToString('N'))
-Run-DotNet publish src/BotToucher2.App -c Release -r win-x64 --self-contained true -p:Version=$Version -o (Join-Path $output 'app')
-Run-DotNet publish src/BotToucher2.Updater -c Release -r win-x64 --self-contained true -p:Version=$Version -o (Join-Path $output 'engine')
+Run-DotNet publish src/BotToucher2.App -c Release -r win-x64 --self-contained true "-p:Version=$Version" -o (Join-Path $output 'app')
+Run-DotNet publish src/BotToucher2.Updater -c Release -r win-x64 --self-contained true "-p:Version=$Version" -o (Join-Path $output 'engine')
 $updater = Join-Path $output 'engine/BotToucher2.Updater.exe'
 $full = Join-Path $output 'full'
 & $updater package --app (Join-Path $output 'app') --engine (Join-Path $output 'engine') --out $full --version $Version
