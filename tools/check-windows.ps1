@@ -1,8 +1,18 @@
 $ErrorActionPreference = 'Stop'
 Set-Location (Join-Path $PSScriptRoot '..')
 function Invoke-DotNet {
-    & dotnet @args
-    if ($LASTEXITCODE -ne 0) { throw "dotnet failed with exit code $LASTEXITCODE" }
+    $PSNativeCommandUseErrorActionPreference = $false
+    $lines = @(& dotnet @args 2>&1)
+    $result = $LASTEXITCODE
+    $lines | ForEach-Object { Write-Host $_ }
+    if ($result -ne 0) {
+        $details = ($lines | Select-Object -Last 80 | ForEach-Object { $_.ToString() }) -join "`n"
+        if ($env:GITHUB_ACTIONS -eq 'true') {
+            $escaped = $details.Replace('%','%25').Replace("`r",'%0D').Replace("`n",'%0A')
+            Write-Output "::error title=BT2 targeted Windows check failed::$escaped"
+        }
+        throw "dotnet failed with exit code $result"
+    }
 }
 Invoke-DotNet build BotToucher2.sln -c Release
 Invoke-DotNet test tests/BotToucher2.Core.Tests -c Release --no-build
