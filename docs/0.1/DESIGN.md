@@ -1,12 +1,12 @@
 # BT2 0.1 design
 
-Status: proposed concrete design for approval, following the user-selected trusted external DLL direction. Implementation has not started.
+Status: approved updater design with corrected 0.1 scope: shell/UI refinement and updater only. Implementation follows this correction.
 
 ## Accepted direction
 
-BT2 remains a Windows-first .NET 8 WPF application, continuing the accepted 0.0 shell. Deliver only 0.1: a manual updater, external trusted-DLL widget foundation, Home information/activity, and the specified dark theme/right-rail refinements. No packet loading, workload runtime, executor, allocator, results model, or CPU/GPU execution.
+BT2 remains a Windows-first .NET 8 WPF application, continuing the accepted 0.0 shell. Deliver only 0.1: a manual updater, Home information/activity, and the specified dark theme/right-rail refinements. No packet loading, workload runtime, executor, allocator, results model, or CPU/GPU execution.
 
-The user explicitly selected **trusted external .NET DLLs**, not app-registered-only widgets, and requested crash detection/reports and no tests running at launch. An in-process DLL has the application's permissions; this is not a sandbox. Host APIs are ownership contracts, not protection against deliberately bypassing them.
+0.1 does not implement widget hosting/runtime/contracts, external DLL loading, messaging/actions, widget lifecycle/crash handling/proof DLLs or widget persistence. It does not implement packet loading, workload execution, allocator, CPU/GPU execution or results architecture. Those systems require later designs.
 
 The authoritative acceptance list is [DEFINITION-OF-DONE.md](DEFINITION-OF-DONE.md). [BT1-INSPECTION.md](BT1-INSPECTION.md) records inspected source and reuse decisions before implementation. Existing source is changed only for concrete 0.1 requirements.
 
@@ -14,17 +14,13 @@ The authoritative acceptance list is [DEFINITION-OF-DONE.md](DEFINITION-OF-DONE.
 
 Updater alternatives: (a) journaled in-place file replacement, (b) verified version directories and an atomic active-install record. Both need staging, hashes, receipts and recovery. Prefer (b): live binaries remain untouched until the target is complete; one small owned record controls activation. It costs local staging disk space but does not increase download size, and leaves the old installation recoverable after a process interruption. Do not use a second repair/rollback engine.
 
-Widget alternatives discussed with the user: app-registered programs, trusted external DLLs, or an isolated runtime. The user chose trusted external DLLs. External code loads only after explicit user action. No sandbox, VM, script interpreter or packet loader is introduced.
-
 ## Project responsibilities
 
-- Existing `BotToucher2.App`: WPF shell, Home cards, lightweight Updates frontend, app-owned widget placement host, crash/fault presentation, Windows startup/shutdown integration.
-- Existing `BotToucher2.Core`: preserve hardware lifetime and preference safety; add shared activity records and simple app-owned layout data where portable.
+- Existing `BotToucher2.App`: WPF shell, Home cards, lightweight Updates frontend and Windows startup/shutdown integration.
+- Existing `BotToucher2.Core`: preserve hardware lifetime and preference safety; add shared activity records where portable.
 - `BotToucher2.Update`: one UI-independent transaction engine, manifests, inventory validation, release transport, receipts, journal, install/rollback/recovery operations. The external updater uses this exact engine; UI has no competing file mutation path.
 - `BotToucher2.Updater`: command-line/bootstrap frontend outside the active application folder, including explicit install/check/apply/rollback/recover and launcher entry points. It can work when the main WPF executable is damaged. This is a frontend, not a second authority.
-- `BotToucher2.Widgets.Contracts`: versioned narrow trusted-widget API and identity/context/message/action contracts. WPF presentation is explicit in the Windows widget SDK; no packet or compute contracts.
-- `BotToucher2.Widgets`: loader, lifecycle coordination, scoped message delivery and subscription ownership. Application layout remains outside widget programs.
-- External proof DLL projects and Windows smoke/transaction test executables live under test/examples paths, are launched explicitly, and are never referenced by production startup.
+- Windows smoke/transaction tests live under test paths and run only through explicit test entry points.
 
 Keep files grouped by responsibility; do not create general plugin/provider infrastructure unrelated to these concrete contracts.
 
@@ -39,11 +35,10 @@ Per-user root `%LOCALAPPDATA%/BotToucher2/`:
 - `updates/staging/<transaction-id>/`: downloaded changed/new payload and reconstructed complete target; never executed before verification.
 - `updates/transactions/`: bounded transaction journal and receipts/history, bound to exact paths, identities and manifest digest.
 - `updates/rollback/`: rollback receipt and only state snapshots required by the retained known-good previous installation; application bytes live in its immutable version directory.
-- `state/`: shell and widget layout; widget binaries are not state, and executable behavior is never deserialized from layout.
-- `widgets/`: user-approved external DLL sets and dependency files, separate from application installation/update inventory.
-- `logs/`: bounded real activity/diagnostic records and crash reports.
+- `state/`: shell preferences only; executable behavior is never deserialized from state.
+- `logs/`: bounded real shell/update activity and diagnostic records.
 
-Existing 0.0 `layout.json` must be imported through explicit validated migration, retaining original bytes. Widgets right-tab values map to Context. Corrupt/foreign preferences still produce defaults plus a visible nonfatal notice and are not silently overwritten. Widget layout uses a separate schema and the same preservation policy. Routine updates do not require administrator rights.
+Existing 0.0 `layout.json` must be imported through explicit validated migration, retaining original bytes. Widgets right-tab values map to Context. Corrupt/foreign preferences still produce defaults plus a visible nonfatal notice and are not silently overwritten. Routine updates do not require administrator rights.
 
 The initial bootstrap/full install may transfer a full application. A loose 0.0 ZIP has no trusted install receipt: do not pretend it is a verified managed source. Establish 0.1 as a clean managed install while preserving validated user state. Later managed transitions transfer changed/new data only.
 
@@ -77,7 +72,7 @@ All mutation commands share one cross-process lease and transaction state machin
 3. Verify the complete reconstructed staged target and reserve sufficient disk space. Any failure leaves the live install and known-good rollback unchanged.
 4. Bind the staged transition to a helper handoff. Request orderly BT2 shutdown; wait for the actual parent process to exit. The helper holds/reacquires the shared lease and re-verifies source/stage before mutation.
 5. Journal the pending transition and retain the existing previous-known-good rollback. Snapshot only mutable state touched by this transition. Publish the verified version directory and atomically activate a pending target record; keep recovery evidence for an interruption.
-6. Verify the installed target, relaunch it, and await a transaction-bound readiness acknowledgment after real shell initialization, with tests and widgets still stopped. A byte-correct but unlaunchable candidate is not accepted as known-good.
+6. Verify the installed target, relaunch it, and await a transaction-bound readiness acknowledgment after real shell initialization, with no tests or update operations started automatically. A byte-correct but unlaunchable candidate is not accepted as known-good.
 7. Commit the receipt/known-good active record, then rotate rollback to the just-replaced known-good version and clean obsolete managed bytes. No earlier rollback is destroyed before commit. Failed launch/verification restores the prior active record and retains the older rollback; record/report the failure.
 
 Interrupted transitions are inspected by the same engine using durable phases and exact receipt identities; unknown/tampered states are rejected, never guessed. Rollback verifies current inventory, receipt and backup before switching, verifies the restored target, relaunches and records the result. A damaged-current recovery must be an explicit full-replacement/recovery mode of this same engine, preserve evidence of mismatched bytes, and never silently relax normal source verification.
@@ -88,7 +83,7 @@ The bootstrap/control component must remain independently invocable and bind its
 
 ## Transaction decisions resolved by the builder check
 
-These are proposed implementation choices made to remove ambiguity; the user has not yet approved this written design.
+These decisions define the approved version-directory/atomic-record updater, subject to a concrete implementation flaw being documented before a necessary change.
 
 ### Updater/control self-update
 
@@ -106,44 +101,26 @@ Recovery compares the journal's transaction ID with the atomic record. If commit
 
 Only `state/` contains managed mutable shell/widget-layout state in 0.1. External widget binaries/data and activity logs are outside that snapshot. After the old app exits and before activating a candidate, snapshot the full bounded managed state directory, including exact bytes and a hashed inventory. Stage preparation does not migrate the live state.
 
-The candidate loads/migrates preferences in memory for readiness, runs no widgets/tests, and does not persist state or accept user edits until the updater records commit. If candidate readiness fails, restore the verified pre-transition state snapshot using the same journaled authority; retain any unexpected differing state bytes for recovery rather than discard them.
+The candidate loads/migrates preferences in memory for readiness, runs no tests or update operations, and does not persist state or accept user edits until the updater records commit. If candidate readiness fails, restore the verified pre-transition state snapshot using the same journaled authority; retain any unexpected differing state bytes for recovery rather than discard them.
 
 A later explicit rollback first preserves the user's **current** state as one reported displaced-state recovery snapshot, then restores the state snapshot paired with the previous known-good version. Show this consequence before user confirmation. This prevents incompatible preferences from being fed to older code without silently losing subsequent changes. Keep one displaced-state recovery snapshot, distinct from the single executable rollback version; if unresolved recovery evidence prevents safe rotation, refuse rather than silently delete it. No schema for future workload/session data is defined.
 
-## External trusted widget contract
+## Activity and startup safety
 
-Use a user-selected .NET DLL set with one explicitly selected module/factory identity. Explicit loading shows its path/identity and states that it has application permissions. File selection/trust confirmation precedes loading/reflection or factory invocation. A compatible versioned interface supplies module/instance identity, a scoped context, lifecycle operations and a WPF surface that owns only its interior.
-
-A dedicated AssemblyLoadContext resolves the module's local dependencies while sharing the host contract/framework assemblies; reject incompatible contracts and ambiguous entry points. It is dependency/lifetime separation, not isolation. Do not promise immediate unloading if widget/WPF references or threads remain alive. No assembly discovery, module initialization, reflection, factory calls or lifecycle start happens during normal application startup or layout restore.
-
-Workspace placeholders can restore descriptors, geometry, visibility and missing-module notices from data without loading code. A deliberate Load/Start action activates selected code. Two generic independently loaded proof widgets demonstrate real external hosting and named communication. They contain no workload/test execution or results meaning. They are not automatically loaded as production examples.
-
-## Widget ownership, messaging and actions
-
-- Workspace controls position/size/visibility/arrangement and validates geometry. Widget content is clipped to its app-assigned rectangle; global layout is not exposed as a mutable object.
-- Runtime owns created/starting/running/stopping/stopped/faulted states, cancellation, subscriptions and disposal. Stop gates new deliveries, requests cancellation and drains in-flight work before disposing. A noncooperative trusted DLL cannot be safely forcibly unloaded; report timeout/failure without pretending it stopped.
-- Messages are named information. Scope them by module/group namespace and widget instance identity. Allow multiple instances in one cooperating group; isolate different groups. Subscriptions have idempotent leases owned by runtime context; subscriber failures are reported without breaking other subscribers. Avoid an unbounded global event vocabulary.
-- Actions are explicit requests to application-registered handlers. Unknown actions are denied. Include only an existing meaningful shell action (for example reporting an activity event or requesting navigation) sufficient to prove this boundary; do not add execution/update/filesystem privileges as future placeholders.
-- UI is created/updated on the WPF dispatcher. Lifecycle/message work uses asynchronous/background boundaries where appropriate. Trusted DLLs can still violate these rules; the design does not claim containment.
-
-## Crash detection, activity and startup safety
-
-One bounded activity service supplies Home Recent Activity, Packet Center Activity, updater events and persistent logs. Record real startup, preference fallback, hardware initialization/failure/recovery, widget lifecycle/faults and updater phases/errors. Do not append periodic identical telemetry-success noise or fake sample events.
+One bounded activity service supplies Home Recent Activity, Packet Center Activity, updater events and persistent logs. Record real startup, preference fallback, hardware initialization/failure/recovery, updater phases/errors. Do not append periodic identical telemetry-success noise or fake sample events.
 
 Home Application Info adapts BT1's useful read-only card: actual assembly version, supplied build/source identity or unavailable, actual install/state/log paths, real release/build state and launch timestamp. Project/Bridge are deferred, never fabricated.
 
-Catch failures at widget lifecycle/message/action boundaries and log a fault report with module/instance/operation and stack details. AppDomain/WPF dispatcher fatal handlers make best-effort crash reports then terminate rather than continue corrupted state. Use a session marker so the next launch reports a previous unclean exit honestly; an unclean marker alone is not proof of a crash. Logging failure must not recursively crash reporting. Trusted native crashes, hangs and abrupt power loss can defeat in-process reporting; state that limitation.
-
-**Production startup runs no tests, demonstrations, benchmarks, diagnostics workloads, update checks, installs, or widget code.** Only required shell services start (hardware observation, lightweight activity/preferences). Test harnesses are separate explicit entry points. Restoring a widget rectangle does not start its DLL.
+**Production startup runs no tests, demonstrations, benchmarks, diagnostics workloads, update checks or installs.** Only required shell services start (hardware observation, lightweight activity/preferences). Test harnesses are separate explicit entry points.
 
 ## Shell/UI refinement
 
-Keep the accepted three-column window, navigation and both rail controls. Replace bright default tab/content templates with cohesive dark navy surfaces, readable hierarchy, modest cyan accents and visible keyboard focus. Right rail is Context plus the built-in Hardware Monitor only. Home has app-owned Application Info and Recent Activity cards. Lab hosts the generic workspace and widget layout infrastructure, with no execution/results semantics. Settings contains the sole Updates surface.
+Keep the accepted three-column window, navigation and both rail controls. Replace bright default tab/content templates with cohesive dark navy surfaces, readable hierarchy, modest cyan accents and visible keyboard focus. Right rail is Context plus the built-in Hardware Monitor only. Home has app-owned Application Info and Recent Activity cards. Lab remains a clean content boundary for future execution/results, without implementing either system. Settings contains the sole Updates surface.
 
 ## Verification and delivery
 
-Targeted portable tests cover deterministic delta generation and exact transfer counts; source/payload mismatch; path/reparse rejection; no payload reads on status/check; staged/installed verification; failed apply/health acknowledgment preserving rollback; rollback rotation/anchor policy; interrupted transaction recovery; message scopes, unsubscribe/drain, action denial, lifecycle faults and data-only layout restore.
+Targeted portable tests cover deterministic delta generation and exact transfer counts; source/payload mismatch; path/reparse rejection; no payload reads on status/check; staged/installed verification; failed apply/health acknowledgment preserving rollback; rollback rotation/anchor policy; interrupted transaction recovery. No widget, packet or execution tests/architecture are introduced.
 
-Windows tests explicitly launch production app and external updater in a disposable per-user test root; install/update/rollback/reapply and interrupt selected phases. Exercise real DLL loading, two-widget communication, caught/fatal error reporting, no tests/code at launch, dark Home/Settings/right-rail visuals, physical resizing and restarts. Never mutate the user's actual installation during automated tests. Linux cross-builds cannot establish those passes.
+Windows tests explicitly launch production app and external updater in a disposable per-user test root; install/update/rollback/reapply and interrupt selected phases. Exercise no automatic checks/installs/tests at launch, dark Home/Settings/right-rail visuals, Application Info, real Recent Activity, physical resizing and restarts. Never mutate the user's actual installation during automated tests. Linux cross-builds cannot establish those passes.
 
-Publish source/docs to the feature branch, compiled assets to GitHub Releases if access permits, and provide real GitHub links. If Release publication or Windows execution remains unavailable, name the blocker and mark each affected acceptance item UNVERIFIED. Final handoff uses the user's twelve requested sections and stops at 0.1.
+Publish source/docs to the feature branch, compiled assets to GitHub Releases if access permits, and provide real GitHub links. If Release publication or Windows execution remains unavailable, name the blocker and mark each affected acceptance item UNVERIFIED. Final handoff uses the user's fourteen corrected handoff sections and stops at 0.1.
