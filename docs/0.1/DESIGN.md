@@ -1,6 +1,6 @@
 # BT2 0.1 design
 
-Status: approved updater design with corrected 0.1 scope: shell/UI refinement and updater only. Implementation follows this correction.
+Status: approved updater-only 0.1 design; implementation and verification evidence are tracked in HANDOFF.md.
 
 ## Accepted direction
 
@@ -28,15 +28,15 @@ Keep files grouped by responsibility; do not create general plugin/provider infr
 
 Per-user root `%LOCALAPPDATA%/BotToucher2/`:
 
-- `install/versions/<version-and-content-id>/`: immutable full application inventories.
+- `install/versions/<inventory-id>/app/` and `engine/`: one immutable paired app/updater bundle, identified by the canonical combined inventory hash.
 - `install/current.json`: small authoritative active/previous installation identity record, atomically replaced with recovery evidence.
-- `control/bootstrap/`: minimal fixed-protocol launcher/bootstrap outside application versions.
-- `control/versions/<engine-content-id>/`: immutable updater frontend/engine/dependency inventories, separately verified and selected by the same active-install record as the app; a damaged app does not prevent external invocation.
+- `control/workers/<owned-id>/engine/`: verified worker copies outside version directories; `control/app.instance.lock` coordinates application lifetime. Initial bootstrap is a separately downloaded Release artifact. The selected immutable `engine/` can be invoked externally without loading the app.
 - `updates/staging/<transaction-id>/`: downloaded changed/new payload and reconstructed complete target; never executed before verification.
 - `updates/transactions/`: bounded transaction journal and receipts/history, bound to exact paths, identities and manifest digest.
-- `updates/rollback/`: rollback receipt and only state snapshots required by the retained known-good previous installation; application bytes live in its immutable version directory.
+- `updates/snapshots/<transaction-id>/`: verified state snapshots; `updates/rollback/` records explicit displaced-state resolution; transaction receipts bind the previous version to its state.
 - `state/`: shell preferences only; executable behavior is never deserialized from state.
 - `logs/`: bounded real shell/update activity and diagnostic records.
+- `updates/recovery/`, `updates/quarantine/`, `updates/deleting/`: owned recovery/deletion evidence, kept separate from accepted rollback versions.
 
 Existing 0.0 `layout.json` must be imported through explicit validated migration, retaining original bytes. Widgets right-tab values map to Context. Corrupt/foreign preferences still produce defaults plus a visible nonfatal notice and are not silently overwritten. Routine updates do not require administrator rights.
 
@@ -87,13 +87,13 @@ These decisions define the approved version-directory/atomic-record updater, sub
 
 ### Updater/control self-update
 
-Transition manifests include separately identified **application and updater-engine inventories**, including their target hashes. Stage/verify both under immutable version/content IDs. `current.json` selects an app/engine pair; rollback selects the corresponding previous pair. A worker copy of the current verified updater engine runs outside both target directories, so no loaded executable/DLL needs in-place replacement. The same engine owns these operations; the minimal bootstrap only selects/launches an owned verified entry point and never stages/applies/rolls back files itself.
+Transition manifests include role-prefixed **application and updater-engine inventories**, including target hashes. Stage/verify the complete paired bundle under one inventory ID. `current.json` selects that paired bundle; rollback selects the corresponding previous pair. A worker copy of the current verified updater engine runs outside both target directories, so no loaded executable/DLL needs in-place replacement. The same engine owns these operations; the minimal bootstrap only selects/launches an owned verified entry point and never stages/applies/rolls back files itself.
 
-The initial bootstrap launcher protocol stays fixed through 0.1; manifests declare a minimum bootstrap protocol and incompatible targets are refused. Changing that bootstrap protocol itself requires explicit bootstrap replacement, not an invented second recovery engine. Routine engine changes use the same managed transition and paired receipt. Stage failure preserves both current app and current engine.
+Concrete inspection refinement: the initial separate-root proposal duplicated publish/recovery mutations. One paired bundle keeps engine files outside `app/`, independently invocable, while enabling one directory publication and one selection identity. This preserves one authority. The Release bootstrap reconstructs and verifies a standalone engine worker from content-addressed assets, then invokes the same engine. The bootstrap protocol stays fixed through 0.1; manifests declare a minimum bootstrap protocol and incompatible targets are refused. Changing that bootstrap protocol itself requires explicit bootstrap replacement, not an invented second recovery engine. Routine engine changes use the same managed transition and paired receipt. Stage failure preserves both current app and current engine.
 
 ### Exact commit and interruption rule
 
-One atomic replacement of `current.json` is the **sole commit point**. That committed record contains the transaction ID, current app/engine inventory IDs, previous-known-good pair, associated state snapshot identity and known-good receipt identity. A candidate/pending record is not a committed known-good version. Before replacing it, persist the complete verified receipt and readiness acknowledgment so the referenced artifacts already exist. Append human/history events and perform pruning after commit; they are not alternate authorities.
+One atomic replacement of `current.json` is the **sole commit point**. That committed record contains the transaction ID, current paired app/engine inventory identity, previous-known-good pair, associated state snapshot identity and known-good receipt identity. A candidate/pending record is not a committed known-good version. Before replacing it, persist the complete verified receipt and readiness acknowledgment so the referenced artifacts already exist. Append human/history events and perform pruning after commit; they are not alternate authorities.
 
 Recovery compares the journal's transaction ID with the atomic record. If committed, finish idempotent cleanup and do not rotate again. If pending/uncommitted, preserve the existing previous-known-good pair, restore the pre-transaction app/engine selection and state where needed, record failure and offer explicit retry/recovery. A damaged/mismatched record or receipt blocks automatic mutation and preserves evidence. Never infer success from a directory name or process exit alone.
 

@@ -11,8 +11,11 @@ public sealed class ReleaseTests
     {
         var bytes = Encoding.UTF8.GetBytes("changed");
         var hash = Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
-        var baseline = new[] { new InventoryFile("app/runtime.dll", 200_000_000, new string('b', 64)) };
-        var manifest = UpdatePlanner.CreateManifest("0.1.1", baseline, baseline.Concat(new[] { new InventoryFile("app/BotToucher2.exe", bytes.Length, hash) }), "0.1.0");
+        var baseline = new[] {
+            new InventoryFile("app/runtime.dll", 200_000_000, new string('b', 64)),
+            new InventoryFile("app/BotToucher2.exe", 3, new string('a', 64)),
+            new InventoryFile("engine/BotToucher2.Updater.exe", 11, new string('c', 64)) };
+        var manifest = UpdatePlanner.CreateManifest("0.1.1", baseline, baseline.Where(f => f.Path != "app/BotToucher2.exe").Concat(new[] { new InventoryFile("app/BotToucher2.exe", bytes.Length, hash) }), "0.1.0");
         var handler = new FixtureHandler(manifest);
         var client = new GitHubReleaseClient(new HttpClient(handler));
         var result = await client.CheckAsync(new UpdateStatus(new InstallationIdentity("0.1.0", manifest.SourceId!), null, "/must-not-be-scanned", null, false));
@@ -26,8 +29,16 @@ public sealed class ReleaseTests
     }
     [Fact] public async Task Check_rejects_manifest_hash_mismatch_before_install()
     {
-        var manifest = UpdatePlanner.CreateManifest("0.1.1", null, new[] { new InventoryFile("app/BotToucher2.exe", 0, new string('a',64)) });
+        var manifest = UpdatePlanner.CreateManifest("0.1.1", null, new[] { new InventoryFile("app/BotToucher2.exe", 1, new string('a',64)), new InventoryFile("engine/BotToucher2.Updater.exe", 1, new string('a',64)) });
         var handler = new FixtureHandler(manifest) { CorruptManifest = true };
+        await Assert.ThrowsAsync<InvalidDataException>(() => new GitHubReleaseClient(new HttpClient(handler)).CheckAsync(new(null,null,null,null,false)));
+        Assert.Equal(3, handler.Requests.Count);
+    }
+    [Fact] public async Task Check_rejects_a_target_without_its_external_updater()
+    {
+        var valid = UpdatePlanner.CreateManifest("0.1.1", null, new[] { new InventoryFile("app/BotToucher2.exe", 7, new string('a',64)), new InventoryFile("engine/BotToucher2.Updater.exe", 7, new string('a',64)) });
+        var manifest = valid with { Target = valid.Target.Where(f => f.Path.StartsWith("app/", StringComparison.Ordinal)).ToArray() };
+        var handler = new FixtureHandler(manifest);
         await Assert.ThrowsAsync<InvalidDataException>(() => new GitHubReleaseClient(new HttpClient(handler)).CheckAsync(new(null,null,null,null,false)));
         Assert.Equal(3, handler.Requests.Count);
     }

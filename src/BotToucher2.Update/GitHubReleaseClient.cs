@@ -57,8 +57,11 @@ public sealed class GitHubReleaseClient(HttpClient http)
             if (manifestBytes.LongLength != transition.ManifestBytes || !Convert.ToHexString(SHA256.HashData(manifestBytes)).Equals(transition.ManifestSha256, StringComparison.OrdinalIgnoreCase))
                 throw new InvalidDataException("Transition manifest hash/size mismatch.");
             var manifest = JsonSerializer.Deserialize<TransitionManifest>(manifestBytes) ?? throw new InvalidDataException("Empty transition manifest.");
+            if (manifest.MinimumBootstrapProtocol != 1) throw new InvalidDataException("Release requires a different bootstrap protocol; install its verified bootstrap explicitly.");
             if (manifest.Version != metadata.Version || manifest.SourceId != status.Current?.InventoryId || manifest.SourceVersion != status.Current?.Version || manifest.RequiredBytes != transition.PayloadBytes)
                 throw new InvalidDataException("Transition does not match selected source/target/size.");
+            if (!manifest.Target.Any(f => f.Path == "app/BotToucher2.exe") || !manifest.Target.Any(f => f.Path == "engine/BotToucher2.Updater.exe"))
+                throw new InvalidDataException("Release omits an application/updater entry point.");
             // Structural validation and byte accounting only; no installation or payload access.
             var expected = UpdatePlanner.CreateManifest(manifest.Version, manifest.SourceId is null ? null : manifest.Source, manifest.Target, manifest.SourceVersion);
             if (expected.SourceId != manifest.SourceId || expected.TargetId != manifest.TargetId || expected.RequiredBytes != manifest.RequiredBytes || !expected.Operations.SequenceEqual(manifest.Operations))

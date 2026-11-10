@@ -84,7 +84,16 @@ public partial class MainWindow : Window
         divider.Width = new GridLength(visible ? 5 : 0);
         rail.Visibility = splitter.Visibility = visible ? Visibility.Visible : Visibility.Collapsed;
     }
-    public void RestoreLayout(ShellState state) => ApplyState(state);
+    public void RestoreLayout(ShellState state)
+    {
+        state.Validate();
+        if (state.Destination == Destination.PacketCenter && state.PacketSection == PacketSection.UpdateCenter)
+        {
+            ApplyState(state with { Destination = Destination.Settings, PacketSection = PacketSection.Packets });
+            _settings.OpenUpdates();
+        }
+        else ApplyState(state);
+    }
     public void ShowNotice(string notice)
     {
         NoticeText.Text = notice; NoticeBorder.Visibility = Visibility.Visible;

@@ -15,9 +15,6 @@ Repository `jakeisboss/bot-toucher`:
 |---|---|---|
 | Core `Services/SelfUpdateService.cs`, later revision | Source/target inventory validation; deterministic ADD/REPLACE/DELETE/UNCHANGED classification; bounded file inventories; SHA-256 commitments; source verification; owned-path/reparse checks; shared cross-process stage lease | AppIdentity/StoragePaths coupling; recovery-version bindings; legacy receipt migration; whole payload materialized as byte arrays; in-place replacement must be reassessed against BT2 transaction design |
 | Updater `Program.cs`, release revision | Parent shutdown coordination; stage re-verification; receipts and verified rollback | Independent-looking recovery paths and old application-specific update conventions must not become competing BT2 authorities |
-| Core `Services/WidgetMessageBus.cs` | Named topic delivery, subscription lease, subscriber failure isolation, sequence and identity concepts | Packet-specific guards/contracts and global unscoped topics; snapshot delivery alone does not guarantee no callback after unsubscribe |
-| Core `Services/WidgetActionGateway.cs` | Application registration is authoritative; unknown actions denied; bounded result/failure handling | Packet/runtime capability vocabulary and future production actions not needed in BT2 0.1 |
-| Core `Widgets/WidgetRuntimeContracts.cs`, `Services/WidgetRuntimeService.cs`, `Services/WidgetLayoutService.cs` | Lifecycle states, pure layout/runtime separation, instance identity | Large packet/program/render/compute/input/output vocabulary exceeds this foundation; do not migrate it wholesale |
 | App `Controls/ApplicationInfoProvider.cs` | Read-only application/version/build/path fields; do not invent source revision or authenticated Bridge state | AppServices, project registry, Bridge and widget summary contracts not needed for an app-owned Home card |
 | App `Controls/ActivityFeedPanel.xaml[.cs]` | Bounded event list, timestamp/category/severity, selection/details/copy behavior, Home compact presentation | Card/widget refresh-provider plumbing not needed; don't create a second log authority |
 | Core `Services/ActivityLogService.cs` | Serialized append, real JSONL activity, bounded recent event retention | Process diagnostics bootstrap and existing StoragePaths are BT1-specific |
@@ -38,3 +35,7 @@ A fresh read-only `gh api repos/jakeisboss/bot-toucher-2/releases` failed with `
 ## Repository visibility evidence
 
 A fresh HTTPS repository-page read returned HTTP 200 and GitHub page metadata `octolytics-dimension-repository_public=true`, `visibilityLabel=Public`. This establishes the proposed public-release distribution assumption without inferring visibility from authenticated Git access. It does not establish Releases API readiness or publication permission.
+
+## Corrected scope
+
+Earlier widget-code inspection is superseded by the user’s scope correction. No widget implementation, contract, loader, messaging, lifecycle, proof or persistence is included in 0.1. Only updater and shell/UI material above is considered for this implementation.

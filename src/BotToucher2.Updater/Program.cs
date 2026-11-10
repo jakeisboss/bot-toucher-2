@@ -127,6 +127,8 @@ internal static class Program
         var bundle = Path.Combine(output, "bundle"); Directory.CreateDirectory(bundle);
         Copy(Required(options, "app"), Path.Combine(bundle, "app")); Copy(Required(options, "engine"), Path.Combine(bundle, "engine"));
         var target = UpdatePlanner.Inventory(bundle);
+        if (!target.Any(f => f.Path == "app/BotToucher2.exe") || !target.Any(f => f.Path == "engine/BotToucher2.Updater.exe"))
+            throw new InvalidDataException("Package requires both Windows app and updater entry points.");
         TransitionManifest? source = options.TryGetValue("source", out var file) ? ReadManifest(file).GetAwaiter().GetResult() : null;
         var manifest = UpdatePlanner.CreateManifest(Required(options, "version"), source?.Target, target, source?.Version);
         var assets = Path.Combine(output, "assets"); Directory.CreateDirectory(assets);

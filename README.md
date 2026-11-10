@@ -1,60 +1,51 @@
-# Bot Toucher 2 — 0.0
+# Bot Toucher 2 — 0.1
 
-An independent Windows-first WPF shell. Version 0.0 provides two rails, navigation, a central content boundary and built-in observation-only hardware monitoring. Future functionality is represented by clearly labeled destinations; it is not implemented.
+Windows-first WPF shell plus **one manual updater**. 0.1 adds a cohesive dark shell, Context + Hardware Monitor right rail, Home Application Info/Recent Activity, and Settings → Updates. No widget system, DLL loading, packet loading, workloads or execution/results architecture is implemented.
 
-**Status:** source implemented; Linux cross-build and portable checks pass. Windows launch, interaction and visual acceptance remain unverified. See [verification](docs/VERIFICATION.md) and the [0.0 handoff](docs/HANDOFF-0.0.md).
+The shell never checks for updates, installs, runs tests or benchmarks at production startup. Hardware observation and bounded local activity/preferences are the active shell services.
 
-## Build and run on Windows
+## Build and verify
 
-Install the .NET 8 SDK (8.0.428 or a compatible 8.0.4xx patch) and use PowerShell from this checkout:
+Windows, .NET SDK 8.0.428:
 
 ```powershell
 dotnet build BotToucher2.sln -c Release
-dotnet test tests/BotToucher2.Core.Tests -c Release
-dotnet run --project src/BotToucher2.App -c Release
+./tools/check-windows.ps1
+./tools/test-update-windows.ps1
 ```
 
-Or run `./tools/check-windows.ps1` to build, run portable checks and launch the targeted Windows shell smoke harness. The smoke executable must exit zero and print its individual PASS lines. It does not replace the manual Windows checks.
+The Windows scripts are explicit test entry points. The transaction script uses a disposable temporary root, real app/CLI launches, source-mismatch refusal, update, rollback and reapply. Windows behavior must actually be run there; Linux cross-builds are not acceptance evidence.
 
-To make a self-contained Windows x64 folder:
-
-```powershell
-dotnet publish src/BotToucher2.App -c Release -r win-x64 --self-contained true -o artifacts/win-x64
-```
-
-Run `artifacts/win-x64/BotToucher2.exe`. Keep the entire published directory together. This build needs no separately installed .NET runtime. It is not an installer or updater.
-
-## Development in this Linux cloud environment
-
-Use the existing checkout; the cloud task is already isolated. Do not create another worktree unless explicitly requested.
+Cloud Linux development uses the existing isolated checkout—do not create another worktree unless requested:
 
 ```bash
 ./tools/bootstrap-dotnet.sh
-./tools/dotnet.sh restore BotToucher2.sln
 ./tools/dotnet.sh build BotToucher2.sln -c Release
-./tools/dotnet.sh test tests/BotToucher2.Core.Tests -c Release --no-build
+./tools/dotnet.sh test tests/BotToucher2.Core.Tests -c Release
+./tools/dotnet.sh test tests/BotToucher2.Update.Tests -c Release
+./tools/dotnet.sh test tests/BotToucher2.Release.Tests -c Release
 ```
 
-The bootstrap downloads the pinned official Linux x64 SDK and verifies its SHA-512 before extraction under `/workspace/.tools`. The CLI wrapper keeps first-run data and NuGet packages in that writable directory. In a sandbox that blocks .NET shared-memory mutexes, use the platform's approved command escalation; do not disable verification or change sandbox policy. NuGet access requires `api.nuget.org` and its package CDN destinations permitted by the environment policy. No application secrets or external services are required.
+SDK bootstrap verifies the official artifact checksum before extraction. Where the cloud sandbox blocks .NET shared-memory mutexes, use approved command escalation; do not disable artifact/TLS verification.
 
-WPF cannot launch on Linux. The compiled Windows smoke harness is intentionally excluded from portable test execution. Cross-building is not Windows launch evidence.
+## Install and updates
 
-## Shell behavior
+Compiled distribution belongs in **GitHub Release assets**, not Git history. A release bootstrap ZIP includes content-addressed assets, a full manifest and `bootstrap.ps1`. Extract the whole trusted release and run that script explicitly for a per-user non-admin install under `%LOCALAPPDATA%/BotToucher2`.
 
-- Home, Packet Center, Data, Lab, Settings and Help/About are reachable from the left rail.
-- Packet Center has Project, Packets and Activity; Update Center is reachable inside Packets and has a return button.
-- Context and Widgets are right-rail surfaces. The built-in monitor sits outside those tabs and keeps sampling even if the rail is hidden.
-- Hide/restore either rail with the top buttons; drag or focus a splitter and use arrows to resize. Layout is saved on normal application close.
-- Shortcuts: Ctrl+1–4 for Home/Packet Center/Data/Lab, Ctrl+, for Settings, F1 for Help; Ctrl+Shift+L for the left rail and Ctrl+L for the right.
-- Preferences live in `%LOCALAPPDATA%/BotToucher2/layout.json`. Invalid/unreadable preferences use defaults and display a nonfatal notice; saving is disabled for that session so the original is preserved. Close the app and manually archive/remove an invalid file if you want a fresh layout next time. Detected external file changes disable saving. If a change races with atomic replacement, the displaced bytes are kept in a `layout.json.conflict-*` backup and its path is reported.
-- Telemetry is serial background work. Closing requests cancellation, awaits in-flight sampling and disposes counters before exiting. Unsupported metrics read unavailable; the monitor has no resource controls.
+Settings → Updates opens using small local state only. Check manually retrieves metadata/manifest, not payloads. Install verifies exact source bytes, downloads changed/new content only, reconstructs and verifies a complete target, and hands off to the shared external updater after orderly shutdown. Unchanged and deleted files require no payload download. Identical app/engine blobs download once. Binary patches are deferred.
 
-## Structure and boundaries
+`BotToucher2.Updater.exe` supports explicit status/check/install/stage/apply/rollback/recover/full-recover/launch/package. The selected updater is in `install/versions/<inventory-id>/engine`, separate from `app`; verified workers run outside mutation targets. There is no independent recovery or rollback engine.
 
-- `src/BotToucher2.App`: WPF shell, views, monitor presentation and Windows sampler.
-- `src/BotToucher2.Core`: shell state/preferences and monitor lifetime/snapshot boundary.
-- `tests/BotToucher2.Core.Tests`: targeted portable behavior checks.
-- `tests/BotToucher2.Shell.Smoke`: real WPF shell interaction harness for Windows.
-- `docs/BT1-REUSE.md`: inspected BT1 reference and adaptation decisions.
+Rollback retains one previous known-good version before 1.0; 1.0 becomes a protected anchor. Invalid preferences and mismatched source/receipt/payload bytes are never silently adopted. See [operating and release-format instructions](docs/0.1/OPERATING.md) for commands, state restoration consequences and complete paths.
 
-There is no universal widget host/runtime, packet loader/runtime, updater, allocator, executor, result system or workload logic. These belong to later versions. 0.1 work requires separate approval.
+## Structure
+
+- `BotToucher2.App`: WPF shell and manual update frontend.
+- `BotToucher2.Core`: shell preferences, hardware observation/lifetime and real bounded activity.
+- `BotToucher2.Update`: shared updater authority, inventory/delta planner, transaction journal/receipts, verification, rollback/recovery and GitHub transport.
+- `BotToucher2.Updater`: external OS/process/bootstrap/packaging frontend to that same engine.
+- Three portable test projects plus an explicitly launched Windows WPF smoke executable.
+
+[Approved corrected design](docs/0.1/DESIGN.md) · [Authoritative 0.1 DoD](docs/0.1/DEFINITION-OF-DONE.md) · [BT1 inspection/reuse](docs/0.1/BT1-INSPECTION.md) · [Operating instructions](docs/0.1/OPERATING.md)
+
+No 0.2 work is authorized or implemented. Final verification results and every DoD status are recorded in the 0.1 handoff.

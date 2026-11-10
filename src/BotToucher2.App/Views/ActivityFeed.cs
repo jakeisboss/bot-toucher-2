@@ -15,7 +15,12 @@ public sealed class ActivityFeed : UserControl
     public ActivityFeed(ActivityLog activity)
     {
         _activity = activity;
-        var panel = new StackPanel(); panel.Children.Add(_events); panel.Children.Add(_message); Content = panel;
+        var panel = new Grid();
+        panel.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+        panel.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        panel.Children.Add(_events);
+        var details = new ScrollViewer { Content = _message, MaxHeight = 140, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled, Margin = new Thickness(0, 8, 0, 0) };
+        Grid.SetRow(details, 1); panel.Children.Add(details); Content = panel;
         _events.SelectionChanged += (_, _) => _message.Text = (_events.SelectedItem as ListBoxItem)?.Tag as string ?? "";
         _refresh.Tick += (_, _) => Refresh(); // Also observes events written by the external helper.
         Loaded += (_, _) => { if (!_subscribed) { _activity.Changed += Changed; _subscribed = true; } _refresh.Start(); Refresh(); };
