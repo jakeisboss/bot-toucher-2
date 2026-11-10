@@ -4,7 +4,7 @@
 
 ## Windows build and explicit validation
 
-Use .NET SDK 8.0.428 from the repository root:
+Use .NET SDK 8.0.428 and PowerShell 7 from the repository root:
 
 ```powershell
 dotnet build BotToucher2.sln -c Release
@@ -98,4 +98,4 @@ Opening Updates reads bounded local receipt metadata. Manual Check fetches bound
 ./tools/publish-release.ps1 -Version 0.1.1 -PreviousManifest previous-transition.json
 ```
 
-This explicitly builds and publishes compiled blobs, bootstrap ZIP, small metadata and initial/source-specific manifests as GitHub Release assets. Never commit those files to Git. The script uses authenticated `gh`; access must be supplied by the user's environment, never pasted into chat. A manual GitHub Actions workflow `BT2 0.1 Windows validation` can validate on Windows and optionally publish with the repository-provided token. It has no push/startup trigger. In this cloud environment the live API request is denied by the proxy; publication has not been performed and no artifact link is fabricated.
+This explicitly builds and publishes compiled blobs, bootstrap ZIP, small metadata and initial/source-specific manifests as GitHub Release assets. Never commit those files to Git. The script uses authenticated `gh`; access must be supplied by the user's environment, never pasted into chat. A manual GitHub Actions workflow `BT2 0.1 Windows validation` can validate on Windows and optionally publish with the repository-provided token. Ordinary code pushes do not trigger it. A deliberate `.github/bt2-0.1-windows-validation-request.json` change on this feature branch can request one Windows run and gated publication; application startup never triggers it. Manual workflow dispatch is also available once the workflow is registered on the default branch. In this cloud environment the live API request is denied by the proxy; publication has not been performed and no artifact link is fabricated.

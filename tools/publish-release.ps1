@@ -1,3 +1,4 @@
+#requires -Version 7.0
 # Explicit release publication only. Requires authenticated gh with release-write permission.
 param([string]$Version = '0.1.0', [string]$PreviousManifest)
 $ErrorActionPreference = 'Stop'
@@ -31,5 +32,20 @@ if ($PreviousManifest) {
 $metadata | ConvertTo-Json -Depth 12 | Set-Content -Encoding utf8NoBOM (Join-Path $upload 'bt2-release.json')
 $notes = Join-Path $output 'notes.md'
 "BT2 ${Version}: shell refinements and manual updater only. Initial bootstrap ZIP is for new installs. Existing managed installs download changed/new assets only. Windows acceptance results must be recorded separately." | Set-Content $notes
-& gh release create ('v' + $Version) --repo jakeisboss/bot-toucher-2 --target (git rev-parse HEAD) --title ('Bot Toucher 2 ' + $Version) --notes-file $notes --prerelease (Get-ChildItem -File $upload | ForEach-Object FullName)
-if ($LASTEXITCODE -ne 0) { throw 'Release publication failed; no Git binary fallback is permitted' }
+# Keep the release hidden until every asset exists; batch short names for Windows command-line limits.
+$tag = 'v' + $Version
+& gh release create $tag --repo jakeisboss/bot-toucher-2 --target (git rev-parse HEAD) --title ('Bot Toucher 2 ' + $Version) --notes-file $notes --prerelease --draft
+if ($LASTEXITCODE -ne 0) { throw 'Draft release creation failed; no Git binary fallback is permitted' }
+Push-Location $upload
+try {
+    $files = @(Get-ChildItem -File | ForEach-Object Name)
+    for ($offset = 0; $offset -lt $files.Count; $offset += 20) {
+        $last = [Math]::Min($offset + 19, $files.Count - 1)
+        $batch = @($files[$offset..$last])
+        & gh release upload $tag --repo jakeisboss/bot-toucher-2 @batch
+        if ($LASTEXITCODE -ne 0) { throw 'Asset upload failed; draft retained hidden for inspection' }
+    }
+} finally { Pop-Location }
+& gh release edit $tag --repo jakeisboss/bot-toucher-2 --draft=false --prerelease
+if ($LASTEXITCODE -ne 0) { throw 'Release publication failed; uploaded draft retained, no Git binary fallback' }
+Write-Host ('Published https://github.com/jakeisboss/bot-toucher-2/releases/tag/' + $tag)

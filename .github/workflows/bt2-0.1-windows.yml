@@ -6,14 +6,33 @@ on:
         description: 'Publish v0.1.0 Release assets only after Windows checks pass'
         type: boolean
         default: false
+  push:
+    branches: [bt2-0.1-foundation]
+    paths: [.github/bt2-0.1-windows-validation-request.json]
 permissions:
   contents: read
 jobs:
   windows:
     runs-on: windows-latest
     timeout-minutes: 30
+    outputs:
+      publish_release: ${{ steps.request.outputs.publish_release }}
     steps:
       - uses: actions/checkout@v4
+      - name: Read explicit validation request
+        id: request
+        shell: pwsh
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          MANUAL_PUBLISH: ${{ inputs.publish_release }}
+        run: |
+          $publish = 'false'
+          if ($env:EVENT_NAME -eq 'push') {
+            $request = Get-Content -Raw .github/bt2-0.1-windows-validation-request.json | ConvertFrom-Json
+            if ($request.Version -ne '0.1.0') { throw 'Only the approved 0.1.0 validation request is supported' }
+            if ($request.PublishRelease -eq $true) { $publish = 'true' }
+          } elseif ($env:MANUAL_PUBLISH -eq 'true') { $publish = 'true' }
+          "publish_release=$publish" >> $env:GITHUB_OUTPUT
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '8.0.428'
@@ -23,8 +42,14 @@ jobs:
       - name: Actual disposable update rollback reapply
         shell: pwsh
         run: ./tools/test-update-windows.ps1
+      - name: Public release index check without payload download
+        shell: pwsh
+        run: |
+          $probe = Join-Path $env:RUNNER_TEMP ('BT2-index-check-' + [Guid]::NewGuid().ToString('N'))
+          dotnet run --project src/BotToucher2.Updater -c Release --no-build -- check --root $probe
+          if ($LASTEXITCODE -ne 0) { throw 'Public release metadata check failed' }
   publish:
-    if: ${{ inputs.publish_release }}
+    if: ${{ needs.windows.outputs.publish_release == 'true' }}
     needs: windows
     runs-on: windows-latest
     timeout-minutes: 30
@@ -40,3 +65,16 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: ./tools/publish-release.ps1 -Version 0.1.0
+      - name: Real public metadata check without payload download
+        shell: pwsh
+        run: |
+          $updater = Get-ChildItem artifacts -Filter BotToucher2.Updater.exe -Recurse | Where-Object { $_.FullName -match '[\\/]engine[\\/]' } | Select-Object -First 1
+          if (-not $updater) { throw 'Published helper not found' }
+          $probe = Join-Path $env:RUNNER_TEMP ('BT2-public-check-' + [Guid]::NewGuid().ToString('N'))
+          $found = $false
+          for ($attempt = 0; $attempt -lt 6; $attempt++) {
+            $result = & $updater.FullName check --root $probe
+            if ($LASTEXITCODE -eq 0 -and ($result -join '') -match '0.1.0') { $found = $true; break }
+            Start-Sleep -Seconds 10
+          }
+          if (-not $found) { throw 'Published public release metadata did not become readable' }

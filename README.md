@@ -6,7 +6,7 @@ The shell never checks for updates, installs, runs tests or benchmarks at produc
 
 ## Build and verify
 
-Windows, .NET SDK 8.0.428:
+Windows, .NET SDK 8.0.428; use PowerShell 7 for the scripted checks:
 
 ```powershell
 dotnet build BotToucher2.sln -c Release
@@ -46,6 +46,6 @@ Rollback retains one previous known-good version before 1.0; 1.0 becomes a prote
 - `BotToucher2.Updater`: external OS/process/bootstrap/packaging frontend to that same engine.
 - Three portable test projects plus an explicitly launched Windows WPF smoke executable.
 
-[Approved corrected design](docs/0.1/DESIGN.md) · [Authoritative 0.1 DoD](docs/0.1/DEFINITION-OF-DONE.md) · [BT1 inspection/reuse](docs/0.1/BT1-INSPECTION.md) · [Operating instructions](docs/0.1/OPERATING.md)
+[Approved corrected design](docs/0.1/DESIGN.md) · [Authoritative 0.1 DoD](docs/0.1/DEFINITION-OF-DONE.md) · [BT1 inspection/reuse](docs/0.1/BT1-INSPECTION.md) · [Operating instructions](docs/0.1/OPERATING.md) · [0.1 handoff](docs/0.1/HANDOFF.md)
 
 No 0.2 work is authorized or implemented. Final verification results and every DoD status are recorded in the 0.1 handoff.
