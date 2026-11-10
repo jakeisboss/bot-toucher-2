@@ -42,3 +42,19 @@ The test runner emits its existing informational `VSTEST_ARTIFACTS_DIRECTORY` fa
 ## Limits
 
 Actual Windows metadata delete/replace sharing, Windows loaded-image lifetime during managed dispatch/pruning/quarantine, production readiness/commit overlap, WPF timer interaction/rendering, helper death and full Windows transaction execution remain **UNVERIFIED** in this environment. The expanded Windows scripts/smoke are intended checks, not execution evidence. Portable process tests prove dispatch/result behavior with the native Linux test apphost only. Live Release access/publication and release readiness remain the parent's external evidence responsibility; this fix report makes no Windows or publication pass claim.
+
+## Scoped re-review corrections after f966443
+
+The re-review accepted the status race and original activity-selection fixes, and identified two residual issues in the fix diff. Both are corrected without changing the transaction authority:
+
+- The managed caller's current directory was inherited by its worker. Worker process construction now uses the independently verified worker directory as `WorkingDirectory`. Filesystem option values (`root`, `manifest`, `assets`, and the other existing path options) resolve to absolute paths against the original caller directory before dispatch. Opaque stage/PID/notes/confirmation values remain unchanged. The portable test checks the actual production ProcessStartInfo and forwarded arguments. Both real CLI subprocess cases now start with CWD inside the managed engine, pass a relative root and relative filesystem options, and assert the resulting owned request paths. The Windows proof likewise starts the CLI in the managed engine directory while its test shell stays outside mutation targets; its relative paths exercise both retained-engine pruning and managed current full recovery. That proof now explicitly requires PowerShell 7, using ProcessStartInfo.ArgumentList rather than lossy shell argument re-quoting.
+- A successful unchanged activity read now clears a prior transient read error and restores the selected/default details before skipping row rebuilding. Portable tests cover selected and unselected details, keeping the original row collection. The WPF smoke holds an actual exclusive log-file handle until the unavailable message appears, releases it, and checks the selected detail returns with the same selected row object.
+
+The new tests were written before the correction and initially failed compilation for the missing path-context/process-start and detail/error-state behavior. Targeted final commands:
+
+- `tools/dotnet.sh test tests/BotToucher2.Release.Tests -c Release --filter FullyQualifiedName~DispatchTests --verbosity minimal`: **15/15 passed**, including both actual CLI subprocess cases with managed caller CWD.
+- `tools/dotnet.sh test tests/BotToucher2.Core.Tests -c Release --filter FullyQualifiedName~Successful_unchanged --verbosity minimal`: **2/2 passed**.
+- `tools/dotnet.sh test BotToucher2.sln -c Release --verbosity minimal`: **111/111 passed: 60 Update, 33 Core, 18 Release; zero failures/skips**.
+- `tools/dotnet.sh build BotToucher2.sln -c Release --no-restore --verbosity minimal`: **succeeded with zero warnings/errors**, including the expanded Windows WPF smoke.
+
+Windows working-directory locks, the updated PowerShell transaction script, and actual WPF transient-error recovery remain **UNVERIFIED** here pending the parent's explicit Windows execution. No workflow, publication script, or parent HANDOFF edits are included in this scoped correction.

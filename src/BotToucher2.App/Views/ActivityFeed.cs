@@ -27,7 +27,7 @@ public sealed class ActivityFeed : UserControl
         {
             if (_changingRows) return;
             _state.Select((_events.SelectedItem as ListBoxItem)?.Tag as ActivityEntry);
-            _message.Text = _state.Selected?.Message ?? "Select an event to read its full message.";
+            _message.Text = _state.Details;
         };
         _refresh.Tick += (_, _) => Refresh(); // Also observes events written by the external helper.
         Loaded += (_, _) => { if (!_subscribed) { _activity.Changed += Changed; _subscribed = true; } _refresh.Start(); Refresh(); };
@@ -41,15 +41,18 @@ public sealed class ActivityFeed : UserControl
         try
         {
             var rows = await _activity.RecentAsync(50);
-            if (!IsLoaded || !_state.Refresh(rows)) return;
+            if (!IsLoaded) return;
+            var changed = _state.Refresh(rows);
+            _message.Text = _state.Details;
+            if (!changed) return;
             _changingRows = true;
             _events.Items.Clear();
             foreach (var row in rows)
                 _events.Items.Add(new ListBoxItem { Content = new TextBlock { Text = $"{row.Timestamp.ToLocalTime():HH:mm:ss}  {row.Severity} / {row.Code}\n{row.Message}", TextWrapping = TextWrapping.Wrap }, Tag = row });
             _events.SelectedItem = _events.Items.Cast<ListBoxItem>().FirstOrDefault(item => Equals(item.Tag, _state.Selected));
-            _message.Text = _state.Selected?.Message ?? (rows.Count == 0 ? "No activity has been recorded yet." : "Select an event to read its full message.");
+            _message.Text = _state.Details;
         }
-        catch (Exception ex) when (ex is System.IO.IOException or UnauthorizedAccessException) { _message.Text = "Activity log is unavailable: " + ex.Message; }
+        catch (Exception ex) when (ex is System.IO.IOException or UnauthorizedAccessException) { _state.ReportUnavailable(ex.Message); _message.Text = _state.Details; }
         finally { _changingRows = false; _refreshing = false; }
     }
 }

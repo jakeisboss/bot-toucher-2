@@ -41,4 +41,17 @@ public sealed class ActivityTests : IDisposable
         Assert.Equal("Long diagnostic details", view.Selected!.Message);
         Assert.True(view.Refresh(new[] { newer })); Assert.Null(view.Selected);
     }
+    [Theory]
+    [InlineData(true)] [InlineData(false)]
+    public void Successful_unchanged_refresh_clears_transient_read_error_without_replacing_rows(bool selected)
+    {
+        var entry = new ActivityEntry(DateTimeOffset.UtcNow, "ERROR", "Original diagnostic", "Error");
+        var view = new ActivityFeedState(); view.Refresh(new[] { entry });
+        if (selected) view.Select(entry);
+        var rows = view.Rows; var detail = view.Details;
+        view.ReportUnavailable("temporary file lock"); Assert.NotEqual(detail, view.Details);
+        Assert.False(view.Refresh(new[] { entry with { } }));
+        Assert.Same(rows, view.Rows); Assert.Equal(detail, view.Details);
+        if (selected) Assert.Equal(entry.Message, view.Details);
+    }
 }

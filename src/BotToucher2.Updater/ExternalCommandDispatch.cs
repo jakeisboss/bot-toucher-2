@@ -25,18 +25,28 @@ public static class ExternalCommandDispatch
         var worker = await new UpdateEngine(root).PrepareWorkerAsync();
         return Path.TrimEndingDirectorySeparator(Path.GetFullPath(runningDirectory)).Equals(worker, StringComparison.OrdinalIgnoreCase) ? null : worker;
     }
-    public static string[] WorkerArguments(string[] args, string root, string token, int parentPid)
+    public static string[] WorkerArguments(string[] args, string root, string token, int parentPid, string? originalDirectory = null)
     {
         CheckToken(token);
+        var callerDirectory = Path.GetFullPath(originalDirectory ?? Environment.CurrentDirectory);
         var result = new List<string> { args[0] };
         for (var i = 1; i < args.Length; i += 2)
         {
             if (args[i] is "--dispatch-token" or "--wait-dispatch-pid") throw new ArgumentException("Reserved dispatch option.");
             if (args[i] == "--root") continue;
-            result.Add(args[i]); result.Add(args[i + 1]);
+            result.Add(args[i]);
+            result.Add(args[i] is "--manifest" or "--assets" or "--app" or "--engine" or "--out" or "--source"
+                ? Path.GetFullPath(args[i + 1], callerDirectory) : args[i + 1]);
         }
-        result.AddRange(new[] { "--root", Path.GetFullPath(root), "--dispatch-token", token, "--wait-dispatch-pid", parentPid.ToString(System.Globalization.CultureInfo.InvariantCulture) });
+        result.AddRange(new[] { "--root", Path.GetFullPath(root, callerDirectory), "--dispatch-token", token, "--wait-dispatch-pid", parentPid.ToString(System.Globalization.CultureInfo.InvariantCulture) });
         return result.ToArray();
+    }
+    public static ProcessStartInfo WorkerStartInfo(string worker, string[] forwarded)
+    {
+        // Both loaded images and the process CWD must be outside mutation targets.
+        var start = new ProcessStartInfo(Path.Combine(worker, "BotToucher2.Updater.exe")) { UseShellExecute = false, WorkingDirectory = worker };
+        foreach (var arg in forwarded) start.ArgumentList.Add(arg);
+        return start;
     }
     private static void CheckToken(string token)
     {
@@ -80,8 +90,7 @@ public static class ExternalCommandDispatch
         var requestPath = OwnedPath(root, token, ".request.json"); Directory.CreateDirectory(Path.GetDirectoryName(requestPath)!);
         await using (var file = new FileStream(requestPath, FileMode.CreateNew, FileAccess.Write, FileShare.None))
             await JsonSerializer.SerializeAsync(file, new DispatchRequest(Environment.ProcessId, forwarded, worker));
-        var start = new ProcessStartInfo(Path.Combine(worker, "BotToucher2.Updater.exe")) { UseShellExecute = false, WorkingDirectory = Environment.CurrentDirectory };
-        foreach (var arg in forwarded) start.ArgumentList.Add(arg);
+        var start = WorkerStartInfo(worker, forwarded);
         Process? process = null;
         try
         {

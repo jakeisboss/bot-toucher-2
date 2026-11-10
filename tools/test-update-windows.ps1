@@ -1,3 +1,4 @@
+#requires -Version 7.0
 # Explicit Windows-only integration proof; never called by production startup.
 $ErrorActionPreference = 'Stop'
 Set-Location (Join-Path $PSScriptRoot '..')
@@ -20,8 +21,32 @@ function Read-SharedJson {
 }
 function Run-ManagedUpdater {
     param([string]$Executable)
-    $acceptedText = & $Executable @args --root $script:installRoot
-    if ($LASTEXITCODE -ne 0) { throw "Managed updater rejected handoff: $args" }
+    # Only the invoked CLI uses the managed directory as CWD; the proof shell must
+    # remain outside it so it does not itself hold the directory being pruned.
+    $start = [System.Diagnostics.ProcessStartInfo]::new($Executable)
+    $start.WorkingDirectory = [System.IO.Path]::GetDirectoryName($Executable)
+    $start.UseShellExecute = $false
+    $start.RedirectStandardOutput = $true
+    $start.RedirectStandardError = $true
+    for ($i = 0; $i -lt $args.Count; $i++) {
+        $start.ArgumentList.Add($args[$i])
+        if ($args[$i] -in @('--manifest', '--assets')) {
+            $i++
+            $start.ArgumentList.Add([System.IO.Path]::GetRelativePath($start.WorkingDirectory, [System.IO.Path]::GetFullPath($args[$i])))
+        }
+    }
+    $start.ArgumentList.Add('--root')
+    $start.ArgumentList.Add([System.IO.Path]::GetRelativePath($start.WorkingDirectory, $script:installRoot))
+    $caller = [System.Diagnostics.Process]::Start($start)
+    try {
+        $stdout = $caller.StandardOutput.ReadToEndAsync()
+        $stderr = $caller.StandardError.ReadToEndAsync()
+        if (-not $caller.WaitForExit(30000)) { $caller.Kill(); throw 'Managed caller did not exit after handoff' }
+        if (-not $stdout.Wait(600000) -or -not $stderr.Wait(600000)) { throw 'Managed command output did not close within ten minutes' }
+        $acceptedText = $stdout.GetAwaiter().GetResult()
+        $errorText = $stderr.GetAwaiter().GetResult()
+        if ($caller.ExitCode -ne 0) { throw "Managed updater rejected handoff: $errorText" }
+    } finally { $caller.Dispose() }
     $accepted = $acceptedText | ConvertFrom-Json
     if ($accepted.State -ne 'Accepted') { throw 'Managed invocation did not explicitly report handoff acceptance' }
     $ownedCommands = [System.IO.Path]::GetFullPath((Join-Path $script:installRoot 'control/commands')) + [System.IO.Path]::DirectorySeparatorChar

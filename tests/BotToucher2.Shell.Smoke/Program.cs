@@ -77,6 +77,11 @@ internal static class Program
                 await Until(() => list.Items.Count == 2);
                 Check(Equals(((ListBoxItem)list.SelectedItem).Tag, ((ListBoxItem)selected).Tag), "New activity preserves the selected diagnostic");
                 Check(Descendants<TextBlock>(feed).Any(text => text.Text == "Diagnostic details must remain selected"), "Selected full diagnostic remains readable");
+                var selectedBeforeLock = list.SelectedItem;
+                using (var lockedLog = new System.IO.FileStream(activity.Path, System.IO.FileMode.Open, System.IO.FileAccess.Read, System.IO.FileShare.None))
+                    await Until(() => Descendants<TextBlock>(feed).Any(text => text.Text.StartsWith("Activity log is unavailable:", StringComparison.Ordinal)));
+                await Until(() => Descendants<TextBlock>(feed).Any(text => text.Text == "Diagnostic details must remain selected"));
+                Check(ReferenceEquals(selectedBeforeLock, list.SelectedItem), "Successful unchanged activity read clears error without rebuilding rows");
                 feedWindow.Close();
                 result = 0;
             }

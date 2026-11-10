@@ -18,7 +18,18 @@ public sealed class DispatchTests
     {
         var root = Path.GetFullPath("space root");
         var args = ExternalCommandDispatch.WorkerArguments(new[] { "install", "--manifest", "a file.json", "--assets", "a b", "--root", "space root" }, root, new string('a', 32), 123);
-        Assert.Equal(new[] { "install", "--manifest", "a file.json", "--assets", "a b", "--root", root, "--dispatch-token", new string('a', 32), "--wait-dispatch-pid", "123" }, args);
+        Assert.Equal(new[] { "install", "--manifest", Path.GetFullPath("a file.json"), "--assets", Path.GetFullPath("a b"), "--root", root, "--dispatch-token", new string('a', 32), "--wait-dispatch-pid", "123" }, args);
+    }
+    [Fact]
+    public void WorkerStartLeavesManagedCallerDirectoryAndResolvesOnlyFilesystemArguments()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "bt2-dispatch-root");
+        var caller = Path.Combine(root, "install", "versions", "old", "engine");
+        var worker = Path.Combine(root, "control", "workers", "verified", "engine");
+        var forwarded = ExternalCommandDispatch.WorkerArguments(new[] { "install", "--manifest", "../release.json", "--assets", "../assets", "--stage", "opaque-id", "--wait-pid", "123", "--notes", "notes/keep", "--confirm", "state-saved" }, "../../../..", new string('d', 32), 456, caller);
+        var start = ExternalCommandDispatch.WorkerStartInfo(worker, forwarded);
+        Assert.Equal(worker, start.WorkingDirectory); Assert.Equal(Path.Combine(worker, "BotToucher2.Updater.exe"), start.FileName);
+        Assert.Equal(new[] { "install", "--manifest", Path.GetFullPath("../release.json", caller), "--assets", Path.GetFullPath("../assets", caller), "--stage", "opaque-id", "--wait-pid", "123", "--notes", "notes/keep", "--confirm", "state-saved", "--root", root, "--dispatch-token", new string('d', 32), "--wait-dispatch-pid", "456" }, start.ArgumentList);
     }
     [Fact]
     public async Task DurableResultsHaveOwnedPathsAndPreserveFailureDetails()
@@ -99,9 +110,11 @@ public sealed class DispatchTests
             var preparedWorker = await engine.PrepareWorkerAsync();
             File.SetUnixFileMode(Path.Combine(preparedWorker, "BotToucher2.Updater.exe"), UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
         }
-        var start = new System.Diagnostics.ProcessStartInfo(executable) { RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false };
+        var start = new System.Diagnostics.ProcessStartInfo(executable) { RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false, WorkingDirectory = Path.GetDirectoryName(executable)! };
         start.Environment["DOTNET_ROOT"] = Path.GetFullPath(Path.Combine(System.Runtime.InteropServices.RuntimeEnvironment.GetRuntimeDirectory(), "..", "..", ".."));
-        start.ArgumentList.Add(command); start.ArgumentList.Add("--root"); start.ArgumentList.Add(managed);
+        start.ArgumentList.Add(command); start.ArgumentList.Add("--root"); start.ArgumentList.Add(Path.GetRelativePath(start.WorkingDirectory, managed));
+        start.ArgumentList.Add("--manifest"); start.ArgumentList.Add("../relative manifest.json");
+        start.ArgumentList.Add("--assets"); start.ArgumentList.Add("../relative assets");
         using var process = System.Diagnostics.Process.Start(start)!;
         var stdout = process.StandardOutput.ReadToEndAsync(); var stderr = process.StandardError.ReadToEndAsync();
         await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(30));
@@ -109,6 +122,11 @@ public sealed class DispatchTests
         var accepted = System.Text.Json.JsonDocument.Parse(await stdout.WaitAsync(TimeSpan.FromSeconds(30))).RootElement;
         Assert.Equal("Accepted", accepted.GetProperty("State").GetString());
         var path = accepted.GetProperty("ResultPath").GetString()!;
+        var request = System.Text.Json.JsonDocument.Parse(await File.ReadAllTextAsync(path.Replace(".result.json", ".request.json"))).RootElement;
+        var forwarded = request.GetProperty("Arguments").EnumerateArray().Select(item => item.GetString()).ToArray();
+        Assert.Contains(Path.GetFullPath("../relative manifest.json", start.WorkingDirectory), forwarded);
+        Assert.Contains(Path.GetFullPath("../relative assets", start.WorkingDirectory), forwarded);
+        Assert.Contains(managed, forwarded);
         var token = Path.GetFileName(path).Split('.')[0]; ExternalCommandResult? result = null;
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         while (result?.State is not ("Completed" or "Failed")) { result = await ExternalCommandDispatch.ReadResultAsync(managed, token); await Task.Delay(10, timeout.Token); }
