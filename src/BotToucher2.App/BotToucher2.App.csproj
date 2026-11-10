@@ -1,0 +1,4 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><OutputType>WinExe</OutputType><TargetFramework>net8.0-windows</TargetFramework><UseWPF>true</UseWPF><EnableWindowsTargeting>true</EnableWindowsTargeting><AssemblyName>BotToucher2</AssemblyName><RootNamespace>BotToucher2.App</RootNamespace></PropertyGroup>
+  <ItemGroup><ProjectReference Include="../BotToucher2.Core/BotToucher2.Core.csproj"/><PackageReference Include="System.Diagnostics.PerformanceCounter" Version="8.0.1"/></ItemGroup>
+</Project>

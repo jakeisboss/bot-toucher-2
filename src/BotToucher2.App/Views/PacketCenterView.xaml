@@ -1,0 +1,13 @@
+<UserControl x:Class="BotToucher2.App.Views.PacketCenterView" xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+  <DockPanel>
+    <StackPanel DockPanel.Dock="Top" Margin="0,0,0,18"><TextBlock Text="Packet Center" FontSize="24" FontWeight="SemiBold"/><TextBlock Text="Project, packet and activity surfaces." Foreground="{StaticResource Muted}" Margin="0,6,0,0"/></StackPanel>
+    <TabControl x:Name="PacketTabs" SelectionChanged="SectionChanged" AutomationProperties.Name="Packet Center sections">
+      <TabItem Header="Project"><ScrollViewer VerticalScrollBarVisibility="Auto"><StackPanel Margin="16"><TextBlock Text="Project" FontSize="18"/><TextBlock Text="Project functionality is reserved for a later version." Foreground="{StaticResource Muted}" Margin="0,10"/></StackPanel></ScrollViewer></TabItem>
+      <TabItem Header="Packets"><Grid>
+        <ScrollViewer x:Name="PacketsSurface" VerticalScrollBarVisibility="Auto"><StackPanel Margin="16"><TextBlock Text="Packets" FontSize="18"/><TextBlock Text="Packet loading is reserved for a later version." Foreground="{StaticResource Muted}" Margin="0,10"/><Button x:Name="OpenUpdateCenter" Content="Update Center" HorizontalAlignment="Left" Click="OpenUpdates"/></StackPanel></ScrollViewer>
+        <ScrollViewer x:Name="UpdateSurface" Visibility="Collapsed" VerticalScrollBarVisibility="Auto"><StackPanel Margin="16"><Button x:Name="BackToPackets" Content="Back to Packets" HorizontalAlignment="Left" Click="ReturnToPackets"/><TextBlock Text="Update Center" FontSize="18" Margin="0,12"/><TextBlock Text="Updates are reserved for a later version." Foreground="{StaticResource Muted}"/></StackPanel></ScrollViewer>
+      </Grid></TabItem>
+      <TabItem Header="Activity"><ScrollViewer VerticalScrollBarVisibility="Auto"><StackPanel Margin="16"><TextBlock Text="Activity" FontSize="18"/><TextBlock Text="Activity recording is reserved for a later version." Foreground="{StaticResource Muted}" Margin="0,10"/></StackPanel></ScrollViewer></TabItem>
+    </TabControl>
+  </DockPanel>
+</UserControl>

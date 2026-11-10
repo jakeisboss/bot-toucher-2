@@ -1,0 +1,54 @@
+<Window x:Class="BotToucher2.App.MainWindow" xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:controls="clr-namespace:BotToucher2.App.Controls" Title="Bot Toucher 2 — 0.0" Width="1280" Height="800" MinWidth="980" MinHeight="600" WindowStartupLocation="CenterScreen" PreviewKeyDown="ShellKeyDown">
+  <Grid>
+    <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="28"/></Grid.RowDefinitions>
+    <Border Background="{StaticResource Bg1}" Padding="14,9" BorderBrush="{StaticResource Border}" BorderThickness="0,0,0,1">
+      <DockPanel LastChildFill="True">
+        <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+          <Button x:Name="ToggleLeft" Content="Hide left rail" Click="ToggleLeftClicked" Margin="4,0" AutomationProperties.Name="Toggle left navigation rail"/>
+          <Button x:Name="ToggleRight" Content="Hide right rail" Click="ToggleRightClicked" Margin="4,0" AutomationProperties.Name="Toggle right rail"/>
+        </StackPanel>
+        <StackPanel Orientation="Horizontal" VerticalAlignment="Center"><TextBlock Text="BOT TOUCHER 2" FontWeight="SemiBold" FontSize="17"/><TextBlock Text="0.0 / SHELL" Foreground="{StaticResource Muted}" Margin="16,3,0,0"/></StackPanel>
+      </DockPanel>
+    </Border>
+    <Border x:Name="NoticeBorder" Grid.Row="1" Background="#44331C" Padding="14,8" Visibility="Collapsed"><TextBlock x:Name="NoticeText" Foreground="#FFE3AF" AutomationProperties.LiveSetting="Polite"/></Border>
+    <Grid Grid.Row="2">
+      <Grid.ColumnDefinitions>
+        <ColumnDefinition x:Name="LeftColumn" Width="180" MinWidth="140" MaxWidth="300"/>
+        <ColumnDefinition x:Name="LeftDivider" Width="5"/>
+        <ColumnDefinition Width="*" MinWidth="260"/>
+        <ColumnDefinition x:Name="RightDivider" Width="5"/>
+        <ColumnDefinition x:Name="RightColumn" Width="280" MinWidth="220" MaxWidth="360"/>
+      </Grid.ColumnDefinitions>
+      <Border x:Name="LeftRail" Background="{StaticResource Bg1}" Padding="10">
+        <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+          <StackPanel>
+            <TextBlock Text="WORKSPACE" Foreground="{StaticResource Muted}" Margin="4,8,0,14" FontSize="11"/>
+            <Button x:Name="HomeNav" Content="Home" Tag="Home" Style="{StaticResource Navigation}" Click="NavigateClicked"/>
+            <Button x:Name="PacketNav" Content="Packet Center" Tag="PacketCenter" Style="{StaticResource Navigation}" Click="NavigateClicked"/>
+            <Button x:Name="DataNav" Content="Data" Tag="Data" Style="{StaticResource Navigation}" Click="NavigateClicked"/>
+            <Button x:Name="LabNav" Content="Lab" Tag="Lab" Style="{StaticResource Navigation}" Click="NavigateClicked"/>
+            <Separator Margin="0,16"/>
+            <Button x:Name="SettingsNav" Content="Settings" Tag="Settings" Style="{StaticResource Navigation}" Click="NavigateClicked"/>
+            <Button x:Name="HelpNav" Content="Help / About" Tag="Help" Style="{StaticResource Navigation}" Click="NavigateClicked"/>
+          </StackPanel>
+        </ScrollViewer>
+      </Border>
+      <GridSplitter x:Name="LeftSplitter" Grid.Column="1" Width="5" HorizontalAlignment="Stretch" Background="{StaticResource Border}" Focusable="True" ToolTip="Drag or use arrow keys to resize this rail" ResizeDirection="Columns" ResizeBehavior="PreviousAndNext" DragCompleted="RailDragCompleted" AutomationProperties.Name="Resize left rail"/>
+      <ContentControl x:Name="WorkspaceHost" Grid.Column="2" Margin="16" HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch" AutomationProperties.Name="Central workspace"/>
+      <GridSplitter x:Name="RightSplitter" Grid.Column="3" Width="5" HorizontalAlignment="Stretch" Background="{StaticResource Border}" Focusable="True" ToolTip="Drag or use arrow keys to resize this rail" ResizeDirection="Columns" ResizeBehavior="PreviousAndNext" DragCompleted="RailDragCompleted" AutomationProperties.Name="Resize right rail"/>
+      <Border x:Name="RightRail" Grid.Column="4" Background="{StaticResource Bg1}" Padding="10">
+        <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+          <StackPanel>
+            <TabControl x:Name="RightTabs" SelectionChanged="RightTabChanged" AutomationProperties.Name="Context and Widgets">
+              <TabItem Header="Context"><StackPanel Margin="10"><TextBlock Text="CURRENT SURFACE" Foreground="{StaticResource Muted}" FontSize="11"/><TextBlock x:Name="ContextText" FontWeight="SemiBold" Margin="0,8"/><TextBlock Text="No workload is active." Foreground="{StaticResource Muted}"/></StackPanel></TabItem>
+              <TabItem Header="Widgets"><StackPanel Margin="10"><TextBlock Text="Widgets" FontWeight="SemiBold"/><TextBlock Text="This surface is reserved for a later version." Foreground="{StaticResource Muted}" Margin="0,8"/></StackPanel></TabItem>
+            </TabControl>
+            <Separator Margin="0,18,0,12"/>
+            <controls:HardwareMonitorPanel x:Name="HardwarePanel"/>
+          </StackPanel>
+        </ScrollViewer>
+      </Border>
+    </Grid>
+    <Border Grid.Row="3" Background="{StaticResource Bg1}" Padding="14,5"><TextBlock x:Name="StatusText" Foreground="{StaticResource Muted}" FontSize="11" Text="Shell ready • No workload loaded"/></Border>
+  </Grid>
+</Window>

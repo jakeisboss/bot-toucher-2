@@ -1,0 +1,8 @@
+<UserControl x:Class="BotToucher2.App.Controls.HardwareMonitorPanel" xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+  <StackPanel>
+    <TextBlock Text="HARDWARE MONITOR" Foreground="{StaticResource Accent}" FontWeight="SemiBold"/>
+    <TextBlock Text="Observation only" Foreground="{StaticResource Muted}" FontSize="11" Margin="0,4,0,12"/>
+    <ItemsControl x:Name="MetricList"><ItemsControl.ItemTemplate><DataTemplate><Border BorderBrush="{StaticResource Border}" BorderThickness="0,0,0,1" Padding="0,8"><StackPanel><DockPanel><TextBlock Text="{Binding Value}" DockPanel.Dock="Right" FontWeight="SemiBold"/><TextBlock Text="{Binding Label}"/></DockPanel><TextBlock Text="{Binding Detail}" Foreground="{StaticResource Muted}" FontSize="11" Margin="0,4,0,0"/></StackPanel></Border></DataTemplate></ItemsControl.ItemTemplate></ItemsControl>
+    <TextBlock x:Name="SampleText" Text="Waiting for the first sample…" Foreground="{StaticResource Muted}" FontSize="11" Margin="0,10,0,0" AutomationProperties.LiveSetting="Polite"/>
+  </StackPanel>
+</UserControl>

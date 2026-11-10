@@ -1,0 +1,50 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31903.59
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "src", "src", "{7272344F-A938-45E9-92E3-F1D37EE1C5C2}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "BotToucher2.Core", "src\BotToucher2.Core\BotToucher2.Core.csproj", "{39745BC2-534C-4633-8400-51CC5CEFA04E}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "BotToucher2.App", "src\BotToucher2.App\BotToucher2.App.csproj", "{0F4D947E-C3F2-4886-B5C7-B74AA3782828}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{CA31E428-C77E-4C26-A15A-A3A7A35D3FDB}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "BotToucher2.Core.Tests", "tests\BotToucher2.Core.Tests\BotToucher2.Core.Tests.csproj", "{41E75D73-9E6E-4948-93AA-3926EA1D2CF5}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "BotToucher2.Shell.Smoke", "tests\BotToucher2.Shell.Smoke\BotToucher2.Shell.Smoke.csproj", "{252DAAC1-2FC0-4AFA-A2C2-3E3111D69D16}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{39745BC2-534C-4633-8400-51CC5CEFA04E}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{39745BC2-534C-4633-8400-51CC5CEFA04E}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{39745BC2-534C-4633-8400-51CC5CEFA04E}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{39745BC2-534C-4633-8400-51CC5CEFA04E}.Release|Any CPU.Build.0 = Release|Any CPU
+		{0F4D947E-C3F2-4886-B5C7-B74AA3782828}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{0F4D947E-C3F2-4886-B5C7-B74AA3782828}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{0F4D947E-C3F2-4886-B5C7-B74AA3782828}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{0F4D947E-C3F2-4886-B5C7-B74AA3782828}.Release|Any CPU.Build.0 = Release|Any CPU
+		{41E75D73-9E6E-4948-93AA-3926EA1D2CF5}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{41E75D73-9E6E-4948-93AA-3926EA1D2CF5}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{41E75D73-9E6E-4948-93AA-3926EA1D2CF5}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{41E75D73-9E6E-4948-93AA-3926EA1D2CF5}.Release|Any CPU.Build.0 = Release|Any CPU
+		{252DAAC1-2FC0-4AFA-A2C2-3E3111D69D16}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{252DAAC1-2FC0-4AFA-A2C2-3E3111D69D16}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{252DAAC1-2FC0-4AFA-A2C2-3E3111D69D16}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{252DAAC1-2FC0-4AFA-A2C2-3E3111D69D16}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(NestedProjects) = preSolution
+		{39745BC2-534C-4633-8400-51CC5CEFA04E} = {7272344F-A938-45E9-92E3-F1D37EE1C5C2}
+		{0F4D947E-C3F2-4886-B5C7-B74AA3782828} = {7272344F-A938-45E9-92E3-F1D37EE1C5C2}
+		{41E75D73-9E6E-4948-93AA-3926EA1D2CF5} = {CA31E428-C77E-4C26-A15A-A3A7A35D3FDB}
+		{252DAAC1-2FC0-4AFA-A2C2-3E3111D69D16} = {CA31E428-C77E-4C26-A15A-A3A7A35D3FDB}
+	EndGlobalSection
+EndGlobal
