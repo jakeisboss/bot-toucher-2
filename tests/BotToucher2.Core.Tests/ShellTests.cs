@@ -32,7 +32,7 @@ public sealed class ShellTests : IDisposable
         Assert.Equal(state, loaded.State);
         Assert.Null(loaded.Notice);
     }
-    [Theory][InlineData("broken JSON")][InlineData("null")][InlineData("{\"SchemaVersion\":99}")]
+    [Theory][InlineData("{}")][InlineData("{\"unexpected\":\"keep me\"}")][InlineData("{\"SchemaVersion\":1}")][InlineData("broken JSON")][InlineData("null")][InlineData("{\"SchemaVersion\":99}")]
     [InlineData("{\"Destination\":999}")][InlineData("{\"LeftWidth\":0}")]
     public async Task Invalid_preferences_show_notice_use_defaults_and_preserve_original(string bytes)
     {
@@ -43,6 +43,26 @@ public sealed class ShellTests : IDisposable
         Assert.False(string.IsNullOrWhiteSpace(loaded.Notice));
         Assert.NotNull(await store.SaveAsync(new ShellState { LeftVisible = false }));
         Assert.Equal(bytes, await File.ReadAllTextAsync(StatePath));
+    }
+    [Fact] public async Task Atomic_replacement_preserves_a_concurrent_external_version_in_a_reported_backup()
+    {
+        var previous = System.Text.Encoding.UTF8.GetBytes("original valid layout");
+        await File.WriteAllTextAsync(StatePath, "external update after comparison");
+        var temporary = StatePath + ".tmp";
+        await File.WriteAllTextAsync(temporary, "new application layout");
+        var notice = await PreferenceCommit.ReplaceAsync(StatePath, temporary, previous);
+        Assert.NotNull(notice);
+        var backup = Assert.Single(Directory.GetFiles(_directory, "layout.json.conflict-*"));
+        Assert.Equal("external update after comparison", await File.ReadAllTextAsync(backup));
+        Assert.Contains(backup, notice);
+    }
+    [Fact] public async Task New_file_commit_never_overwrites_a_file_that_appeared_concurrently()
+    {
+        await File.WriteAllTextAsync(StatePath, "external new file");
+        var temporary = StatePath + ".tmp";
+        await File.WriteAllTextAsync(temporary, "app layout");
+        await Assert.ThrowsAsync<IOException>(() => PreferenceCommit.ReplaceAsync(StatePath, temporary, null));
+        Assert.Equal("external new file", await File.ReadAllTextAsync(StatePath));
     }
     [Fact] public async Task Externally_changed_preferences_are_not_overwritten()
     {

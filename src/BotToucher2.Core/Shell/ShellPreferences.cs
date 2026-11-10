@@ -63,9 +63,10 @@ public sealed class ShellPreferences(string path)
                     _safeToSave = false;
                     return "Layout preferences changed outside this application and were preserved.";
                 }
-                File.Move(temporary, path, overwrite: _baseline is not null);
-                _baseline = bytes;
-                return null;
+                var notice = await PreferenceCommit.ReplaceAsync(path, temporary, _baseline);
+                if (notice is not null) _safeToSave = false;
+                else _baseline = bytes;
+                return notice;
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {

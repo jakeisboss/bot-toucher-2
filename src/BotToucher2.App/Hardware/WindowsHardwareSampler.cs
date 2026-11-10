@@ -129,7 +129,7 @@ public sealed class WindowsHardwareSampler : IHardwareSampler
             Key = "ram",
             Label = "RAM",
             Value = $"{percent:0.#}%",
-            Detail = $"{FormatBytes(used)} / {FormatBytes(status.TotalPhysical)}",
+            Detail = $"{HardwareReadings.FormatBytes(used)} / {HardwareReadings.FormatBytes(status.TotalPhysical)}",
             Percent = percent,
             Available = true
         };
@@ -159,29 +159,7 @@ public sealed class WindowsHardwareSampler : IHardwareSampler
                     used = values.Sum();
             }
 
-            if (used is null)
-                return new HardwareMetricSnapshot
-                {
-                    Key = "vram",
-                    Label = "VRAM",
-                    Value = total is long totalOnly ? FormatBytes((ulong)totalOnly) + " total" : "available",
-                    Detail = "Dedicated usage counter unavailable.",
-                    Available = true
-                };
-
-            // Usage is summed across adapter counters while total is the largest adapter.
-            // A percentage of mismatched populations would be misleading.
-            return new HardwareMetricSnapshot
-            {
-                Key = "vram",
-                Label = "VRAM",
-                Value = FormatBytes((ulong)used.Value),
-                Detail = total is > 0
-                    ? "Dedicated usage across adapter counters; capacity is not directly comparable."
-                    : "Dedicated usage reported by Windows counters.",
-                Percent = null,
-                Available = true
-            };
+            return HardwareReadings.Vram(used, total);
         }
         catch
         {
@@ -315,19 +293,6 @@ public sealed class WindowsHardwareSampler : IHardwareSampler
         Detail = detail,
         Available = false
     };
-
-    private static string FormatBytes(ulong bytes)
-    {
-        string[] units = ["B", "KB", "MB", "GB", "TB"];
-        double value = bytes;
-        var unit = 0;
-        while (value >= 1024 && unit < units.Length - 1)
-        {
-            value /= 1024;
-            unit++;
-        }
-        return $"{value:0.##} {units[unit]}";
-    }
 
     private static ulong ToUInt64(FileTime value) => ((ulong)value.High << 32) | value.Low;
 

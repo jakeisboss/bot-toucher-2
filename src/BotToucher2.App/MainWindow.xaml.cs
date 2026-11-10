@@ -34,6 +34,8 @@ public partial class MainWindow : Window
             [Destination.Settings] = _settings,
             [Destination.Help] = new WorkspaceSurface("Help / About", "Bot Toucher 2 • Version 0.0.0\nWindows shell\n\nCtrl+1 Home • Ctrl+2 Packet Center • Ctrl+3 Data • Ctrl+4 Lab\nCtrl+, Settings • F1 Help\nCtrl+Shift+L toggles the left rail • Ctrl+L toggles the right rail\n\nThe hardware monitor observes this computer. Unsupported metrics are shown as unavailable.")
         };
+        LeftSplitter.AddHandler(Keyboard.KeyDownEvent, new KeyEventHandler(RailKeyDown), handledEventsToo: true);
+        RightSplitter.AddHandler(Keyboard.KeyDownEvent, new KeyEventHandler(RailKeyDown), handledEventsToo: true);
         _ready = true;
         ApplyState(initialState);
         if (notice is not null) ShowNotice(notice);
@@ -99,6 +101,18 @@ public partial class MainWindow : Window
     private void RailDragCompleted(object sender, DragCompletedEventArgs e)
     {
         if (!_ready || _updating || e.Canceled) return;
+        RecordRailWidths();
+    }
+    private void RailKeyDown(object sender, KeyEventArgs e)
+    {
+        // WPF's keyboard splitter path does not raise DragCompleted. Its class handler
+        // has already updated column widths when this handled-events-too handler runs.
+        if (!_ready || _updating || e.Key is not (Key.Left or Key.Right)) return;
+        UpdateLayout();
+        RecordRailWidths();
+    }
+    private void RecordRailWidths()
+    {
         ApplyState(State with {
             LeftWidth = State.LeftVisible ? Math.Clamp(LeftColumn.ActualWidth, 140, 300) : State.LeftWidth,
             RightWidth = State.RightVisible ? Math.Clamp(RightColumn.ActualWidth, 220, 360) : State.RightWidth
