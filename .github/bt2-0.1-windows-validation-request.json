@@ -1,0 +1,6 @@
+{
+  "Version": "0.1.0",
+  "PublishRelease": true,
+  "ReviewedSourceCommit": "e7163b7ea5f5304bfe84dc37e0041da40aedd3f2",
+  "Scope": "One explicit targeted Windows validation and gated GitHub Release publication; no widget/packet/execution work."
+}
