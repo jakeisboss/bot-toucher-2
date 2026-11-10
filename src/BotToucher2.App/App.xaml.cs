@@ -35,7 +35,7 @@ public partial class App : Application
             _instance.Write(System.Text.Encoding.UTF8.GetBytes(Environment.ProcessId.ToString(System.Globalization.CultureInfo.InvariantCulture)));
             _instance.Flush(flushToDisk: true);
             _activity = new ActivityLog(root);
-            await Record("STARTUP", "Bot Toucher 2 0.1.0 started. No update checks, installs or tests run at startup.");
+            await Record("STARTUP", $"Bot Toucher 2 {typeof(App).Assembly.GetName().Version?.ToString(3) ?? "Unavailable"} started. No update checks, installs or tests run at startup.");
             var state = Path.Combine(root, "state"); Directory.CreateDirectory(state);
             var preferencesPath = Path.Combine(state, "layout.json");
             var readyToken = Option(e.Args, "--bt2-ready");

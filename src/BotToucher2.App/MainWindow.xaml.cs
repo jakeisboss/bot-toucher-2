@@ -32,6 +32,7 @@ public partial class MainWindow : Window
             else ApplyState(State with { PacketSection = section });
         };
         _settings = new SettingsView((left, right) => ApplyState(State with { LeftVisible = left, RightVisible = right }), updates);
+        var applicationVersion = typeof(MainWindow).Assembly.GetName().Version?.ToString(3) ?? "Unavailable";
         _surfaces = new()
         {
             [Destination.Home] = new HomeView(root, activity),
@@ -39,7 +40,7 @@ public partial class MainWindow : Window
             [Destination.Data] = new WorkspaceSurface("Data", "Data functionality is reserved for a later version."),
             [Destination.Lab] = new WorkspaceSurface("Lab", "A clean test workspace for future systems.", true),
             [Destination.Settings] = _settings,
-            [Destination.Help] = new WorkspaceSurface("Help / About", "Bot Toucher 2 • Version 0.1.0\nWindows shell\n\nCtrl+1 Home • Ctrl+2 Packet Center • Ctrl+3 Data • Ctrl+4 Lab\nCtrl+, Settings • F1 Help\nCtrl+Shift+L toggles the left rail • Ctrl+L toggles the right rail\n\nThe hardware monitor observes this computer. Unsupported metrics are shown as unavailable.")
+            [Destination.Help] = new WorkspaceSurface("Help / About", $"Bot Toucher 2 • Version {applicationVersion}\nWindows shell\n\nCtrl+1 Home • Ctrl+2 Packet Center • Ctrl+3 Data • Ctrl+4 Lab\nCtrl+, Settings • F1 Help\nCtrl+Shift+L toggles the left rail • Ctrl+L toggles the right rail\n\nThe hardware monitor observes this computer. Unsupported metrics are shown as unavailable.")
         };
         LeftSplitter.AddHandler(Keyboard.KeyDownEvent, new KeyEventHandler(RailKeyDown), handledEventsToo: true);
         RightSplitter.AddHandler(Keyboard.KeyDownEvent, new KeyEventHandler(RailKeyDown), handledEventsToo: true);
