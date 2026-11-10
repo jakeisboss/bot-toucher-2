@@ -30,4 +30,15 @@ public sealed class ActivityTests : IDisposable
         await File.AppendAllTextAsync(log.Path, "invalid tail\n");
         Assert.Equal("START", Assert.Single(await log.RecentAsync()).Code);
     }
+    [Fact] public void Refresh_preserves_selected_entry_and_skips_identical_rows()
+    {
+        var selected = new ActivityEntry(DateTimeOffset.UtcNow, "ERROR", "Long diagnostic details", "Error");
+        var view = new ActivityFeedState();
+        Assert.True(view.Refresh(new[] { selected })); view.Select(selected);
+        Assert.False(view.Refresh(new[] { selected with { } })); Assert.Equal(selected, view.Selected);
+        var newer = new ActivityEntry(DateTimeOffset.UtcNow.AddSeconds(1), "START", "Started", "Info");
+        Assert.True(view.Refresh(new[] { newer, selected with { } })); Assert.Equal(selected, view.Selected);
+        Assert.Equal("Long diagnostic details", view.Selected!.Message);
+        Assert.True(view.Refresh(new[] { newer })); Assert.Null(view.Selected);
+    }
 }

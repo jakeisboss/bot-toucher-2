@@ -12,7 +12,7 @@ dotnet build BotToucher2.sln -c Release
 ./tools/test-update-windows.ps1
 ```
 
-The first script runs the three targeted test projects and real WPF shell smoke. The second builds disposable 0.1.0/0.1.1 test bundles and runs actual initial install, exact-source mismatch refusal, update, rollback and reapply with production app readiness. It touches only a GUID-named temporary root and preserves its evidence. Neither script runs during normal app launch. All Windows execution is UNVERIFIED until run on Windows; Linux builds are not acceptance evidence.
+The first script runs the three targeted test projects and real WPF shell smoke. The second builds disposable 0.1.0/0.1.1/0.1.2 test bundles and runs actual initial install, exact-source mismatch refusal, update, rollback and reapply with production app readiness, then invokes managed current full recovery and an older retained engine whose bundle is pruned. It awaits each final command result and exercises concurrent status metadata reads on Windows. It touches only a GUID-named temporary root and preserves its evidence. Neither script runs during normal app launch. All Windows execution is UNVERIFIED until run on Windows; Linux builds are not acceptance evidence.
 
 Manual Windows checks: Home information reflects actual version/source/path data; real startup/hardware/preference/update events appear on Home and Packet Center Activity; both rails and splitters work at minimum/maximized/restored sizes; dark controls/focus/selection are readable; Settings is the only update workflow. Check performs no payload download. During explicit update, normal app shutdown drains hardware first, helper waits for parent exit, candidate is read-only until commit. While that critical section is active, normal candidate close is deferred; helper death must show a recovery message and permit safe exit without saving state. Test helper termination before and after readiness and recover the journal explicitly. Verify GUI handoff errors remain visible and prior verified app relaunches when safe.
 
@@ -44,6 +44,12 @@ BotToucher2.Updater.exe launch
 
 Use `--root <directory>` for an explicitly chosen/disposable root. `stage` returns an opaque manifest-bound ID; do not substitute a filesystem path. `install` combines explicit stage/apply for local release files. `install-release` explicitly fetches metadata and required assets and installs the compatible release. It is not called automatically. Close BT2 before manual apply/rollback, or use the in-app workflow which hands off the parent PID and orderly shutdown. The engine refuses activation while the app-instance lock is owned.
 
+Managed external mutations (`apply`, `install`, `install-release`, `rollback`, `recover`, `full-recover`) prepare and independently verify an engine worker under `control/workers`. The invoking managed process must exit before that worker mutates anything: otherwise Windows may retain loaded images in a bundle being quarantined or pruned. This is a process-lifetime refinement of the same engine authority.
+
+**For these managed invocations, exit code 0 means handoff accepted, not installation completed.** Standard output is JSON with `State=Accepted` and an owned `ResultPath`. The worker first acknowledges initialization, waits for the invoking process to actually exit, then executes the original command/root/arguments. Read the result JSON until `State` is `Completed` or `Failed`; `ExitCode`, `Output`, and `Error` contain the final outcome. `Ready` is not completion. Bound that wait (the Windows proof uses ten minutes); a missing/stuck result or dead helper is an error requiring explicit status/recovery inspection, never success. Initialization has a fifteen-second acceptance timeout. Results remain under `control/commands/<random-token>.result.json` for inspection, and completion/errors are also logged. A worker flag alone cannot bypass independent engine/path and handoff verification.
+
+An independently trusted bootstrap invoked outside the managed root retains synchronous exit/result behavior, including when the selected app or engine is damaged. A managed invocation with a damaged selected engine refuses dispatch; use that trusted bootstrap for explicit recovery. GUI helpers already run from a verified worker and retain their existing parent-exit handoff.
+
 `recover` resolves an interrupted journal. `full-recover` is an explicit source-null verified replacement for a damaged install, preserving evidence and the known-good rollback instead of promoting damaged bytes. Normal updates and rollback never silently relax source verification.
 
 Rollback restores the prior version's state snapshot, preserves current state in a reported displaced-state directory, and refuses another rollback until that evidence is explicitly resolved. After saving it externally, an operator may run:
@@ -64,6 +70,7 @@ Under the per-user root:
 | `install/versions/<inventory-id>/{app,engine}` | Immutable paired inventories |
 | `control/app.instance.lock` | App-instance lease, outside snapshots |
 | `control/workers/<owned-id>/engine` | Verified helper copies, outside mutation targets |
+| `control/commands/<token>.{request,result}.json` | Owned external-command handoff and final outcome evidence |
 | `state/layout.json` | Shell preferences only |
 | `updates/staging/<opaque-stage-id>` | Full staged target assembled from local unchanged + required downloaded bytes |
 | `updates/transactions` | Journal, readiness-bound receipts and bounded history |

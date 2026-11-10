@@ -43,13 +43,34 @@ public sealed class UpdateEngine
     private static void CheckToken(string value) { if (value.Length != 32 || value.Any(c => !Uri.IsHexDigit(c) || char.IsUpper(c))) throw new InvalidDataException("Invalid owned transaction identifier."); }
     private static void CheckStageId(string stageId) { if (stageId.Length != 97 || stageId[32] != '-' || stageId.Where((_, i) => i != 32).Any(c => !Uri.IsHexDigit(c) || char.IsUpper(c))) throw new InvalidDataException("Invalid stage identifier."); }
     private static string Digest<T>(T value) => Convert.ToHexString(SHA256.HashData(JsonSerializer.SerializeToUtf8Bytes(value, Json))).ToLowerInvariant();
-    private static async Task<T?> Read<T>(string path, CancellationToken ct) { Guard(path); if (!File.Exists(path)) return default; var info = new FileInfo(path); if (info.Length > 4 * 1024 * 1024) throw new InvalidDataException("Metadata exceeds limit."); await using var f = File.OpenRead(path); return await JsonSerializer.DeserializeAsync<T>(f, Json, ct) ?? throw new InvalidDataException("Metadata contains null instead of a record."); }
+    private static async Task<byte[]?> ReadMetadata(string path, CancellationToken ct)
+    {
+        Guard(path);
+        try
+        {
+            await using var file = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete, 4096, FileOptions.Asynchronous);
+            if (file.Length > 4 * 1024 * 1024) throw new InvalidDataException("Metadata exceeds limit.");
+            var bytes = new byte[checked((int)file.Length)]; await file.ReadExactlyAsync(bytes, ct); return bytes;
+        }
+        catch (FileNotFoundException) { return null; }
+        catch (DirectoryNotFoundException) { return null; }
+    }
+    private static T DecodeMetadata<T>(byte[] bytes) => JsonSerializer.Deserialize<T>(bytes, Json) ?? throw new InvalidDataException("Metadata contains null instead of a record.");
+    private static async Task<T?> Read<T>(string path, CancellationToken ct)
+    {
+        var bytes = await ReadMetadata(path, ct); return bytes is null ? default : DecodeMetadata<T>(bytes);
+    }
     private static async Task Write<T>(string path, T value, CancellationToken ct) { Guard(path); Directory.CreateDirectory(Path.GetDirectoryName(path)!); Guard(path); var temp = path + "." + Token() + ".tmp"; try { await using (var f = new FileStream(temp, FileMode.CreateNew, FileAccess.Write, FileShare.None, 4096, FileOptions.WriteThrough)) { await JsonSerializer.SerializeAsync(f, value, Json, ct); if (f.Length > 4 * 1024 * 1024) throw new InvalidDataException("Metadata exceeds limit."); await f.FlushAsync(ct); f.Flush(true); } File.Move(temp, path, true); } finally { if (File.Exists(temp)) File.Delete(temp); } }
     private FileStream Lease() { var path = Guard(Path.Combine(root, "updates", "lease.lock")); Directory.CreateDirectory(Path.GetDirectoryName(path)!); return new FileStream(path, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None); }
     private FileStream AppLease() { var path = Guard(Path.Combine(root, "control", "app.instance.lock")); Directory.CreateDirectory(Path.GetDirectoryName(path)!); return new FileStream(path, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None); }
     private async Task<InstallRecord?> LoadCurrent(CancellationToken ct)
     {
-        var record = await Read<InstallRecord>(CurrentPath, ct); if (record is null) return null;
+        var record = await Read<InstallRecord>(CurrentPath, ct);
+        return await ValidateCurrent(record, ct);
+    }
+    private async Task<InstallRecord?> ValidateCurrent(InstallRecord? record, CancellationToken ct)
+    {
+        if (record is null) return null;
         CheckToken(record.TransactionId);
         ValidateReceipt(record.Current); if (record.Previous is not null) ValidateReceipt(record.Previous); if (record.Anchor is not null) ValidateReceipt(record.Anchor);
         if (record.PreviousStateSnapshot is not null) CheckToken(record.PreviousStateSnapshot); if (record.DisplacedStateSnapshot is not null) CheckToken(record.DisplacedStateSnapshot);
@@ -238,9 +259,32 @@ public sealed class UpdateEngine
     private static string SafeFile(string basePath, string relative) => Path.Combine(basePath, relative.Replace('/', Path.DirectorySeparatorChar));
     public async Task<UpdateStatus> StatusAsync(CancellationToken cancellationToken = default)
     {
-        var record = await LoadCurrent(cancellationToken);
-        return new(record?.Current.Identity, record?.Previous?.Identity, record is null ? null : Path.Combine(Bundle(record.Current.Identity.InventoryId), "app"), record is null ? null : Path.Combine(Bundle(record.Current.Identity.InventoryId), "engine"), File.Exists(JournalPath), record?.DisplacedStateSnapshot is null ? null : Path.Combine(SnapshotRoot(record.DisplacedStateSnapshot), "app"));
+        // The record is the commit authority. Bracket its receipt reads and pending flag
+        // with another record read; pruning may remove the old references meanwhile.
+        // Never take the mutation lease: a candidate polls while its helper owns it.
+        for (var attempt = 0; attempt < 8; attempt++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var before = await ReadMetadata(CurrentPath, cancellationToken);
+            var pendingBefore = File.Exists(JournalPath);
+            InstallRecord? record = null; Exception? failure = null;
+            try
+            {
+                checkpoint?.Invoke("status-current-read");
+                record = await ValidateCurrent(before is null ? null : DecodeMetadata<InstallRecord>(before), cancellationToken);
+                checkpoint?.Invoke("status-validated");
+            }
+            catch (Exception error) when (error is IOException or InvalidDataException or JsonException) { failure = error; }
+            var pendingAfter = File.Exists(JournalPath);
+            var after = await ReadMetadata(CurrentPath, cancellationToken);
+            if (pendingBefore != pendingAfter || !((before is null && after is null) || (before is not null && after is not null && before.AsSpan().SequenceEqual(after)))) continue;
+            if (failure is not null) System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(failure).Throw();
+            return new(record?.Current.Identity, record?.Previous?.Identity, record is null ? null : Path.Combine(Bundle(record.Current.Identity.InventoryId), "app"), record is null ? null : Path.Combine(Bundle(record.Current.Identity.InventoryId), "engine"), pendingAfter, record?.DisplacedStateSnapshot is null ? null : Path.Combine(SnapshotRoot(record.DisplacedStateSnapshot), "app"));
+        }
+        // A continuously changing installation is busy, never a false nonpending old selection.
+        return new(null, null, null, null, true);
     }
+
     public async Task VerifyCurrentAsync(CancellationToken cancellationToken = default)
     {
         using var lease = Lease();

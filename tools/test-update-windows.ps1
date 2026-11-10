@@ -12,6 +12,32 @@ function Run-Updater {
     & $script:seedUpdater @args --root $script:installRoot
     if ($LASTEXITCODE -ne 0) { throw "Updater failed: $args" }
 }
+function Read-SharedJson {
+    param([string]$Path)
+    $stream = [System.IO.File]::Open($Path, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, ([System.IO.FileShare]::ReadWrite -bor [System.IO.FileShare]::Delete))
+    $reader = [System.IO.StreamReader]::new($stream)
+    try { return ($reader.ReadToEnd() | ConvertFrom-Json) } finally { $reader.Dispose() }
+}
+function Run-ManagedUpdater {
+    param([string]$Executable)
+    $acceptedText = & $Executable @args --root $script:installRoot
+    if ($LASTEXITCODE -ne 0) { throw "Managed updater rejected handoff: $args" }
+    $accepted = $acceptedText | ConvertFrom-Json
+    if ($accepted.State -ne 'Accepted') { throw 'Managed invocation did not explicitly report handoff acceptance' }
+    $ownedCommands = [System.IO.Path]::GetFullPath((Join-Path $script:installRoot 'control/commands')) + [System.IO.Path]::DirectorySeparatorChar
+    if (-not $accepted.ResultPath.StartsWith($ownedCommands, [StringComparison]::OrdinalIgnoreCase)) { throw 'Unowned command result path' }
+    $request = Get-Content ($accepted.ResultPath.Replace('.result.json', '.request.json')) -Raw | ConvertFrom-Json
+    $versions = [System.IO.Path]::GetFullPath((Join-Path $script:installRoot 'install/versions'))
+    if ($request.WorkerDirectory.StartsWith($versions, [StringComparison]::OrdinalIgnoreCase)) { throw 'Loaded worker is a mutation target' }
+    $deadline = [DateTime]::UtcNow.AddMinutes(10)
+    do {
+        $result = Read-SharedJson $accepted.ResultPath
+        if ($result.State -in @('Completed', 'Failed')) { break }
+        Start-Sleep -Milliseconds 100
+    } while ([DateTime]::UtcNow -lt $deadline)
+    if ($result.State -ne 'Completed' -or $result.ExitCode -ne 0) { throw "Managed command did not complete successfully: $($result | ConvertTo-Json -Compress). Result: $($accepted.ResultPath)" }
+    Write-Host "Managed command completed: $($accepted.ResultPath)"
+}
 function Get-UpdateStatus {
     $text = & $script:seedUpdater status --root $script:installRoot
     if ($LASTEXITCODE -ne 0) { throw 'Status failed' }
@@ -34,7 +60,8 @@ function Close-TestApp {
     if (-not $app.WaitForExit(15000)) { throw 'Test app did not close cleanly' }
 }
 try {
-    foreach ($version in @('0.1.0','0.1.1')) {
+    Run-DotNet test tests/BotToucher2.Update.Tests -c Release --filter 'FullyQualifiedName~Status'
+    foreach ($version in @('0.1.0','0.1.1','0.1.2')) {
         $folder = Join-Path $testRoot $version
         Run-DotNet publish src/BotToucher2.App -c Release -r win-x64 --self-contained true -p:Version=$version -o (Join-Path $folder 'app')
         Run-DotNet publish src/BotToucher2.Updater -c Release -r win-x64 --self-contained true -p:Version=$version -o (Join-Path $folder 'engine')
@@ -64,7 +91,23 @@ try {
     Run-Updater install --manifest (Join-Path $p1 'transition.json') --assets (Join-Path $p1 'assets')
     if ((Get-UpdateStatus).Current.Version -ne '0.1.1') { throw 'Reapply identity mismatch' }
     Close-TestApp
-    Write-Host "PASS: real Windows install/update/source-mismatch/rollback/reapply and readiness. Evidence retained at $testRoot"
+    # Invoke the retained version that this transition must prune. Its frontend must exit first.
+    $oldEngine = Join-Path $installRoot ('install/versions/' + (Get-UpdateStatus).Previous.InventoryId + '/engine/BotToucher2.Updater.exe')
+    $p2 = Join-Path $testRoot 'package2'
+    Run-Updater package --app (Join-Path $testRoot '0.1.2/app') --engine (Join-Path $testRoot '0.1.2/engine') --out $p2 --version 0.1.2 --source (Join-Path $p1 'transition.json')
+    Run-ManagedUpdater $oldEngine install --manifest (Join-Path $p2 'transition.json') --assets (Join-Path $p2 'assets')
+    if ((Get-UpdateStatus).Current.Version -ne '0.1.2' -or (Test-Path $oldEngine)) { throw 'Old managed engine was not safely pruned' }
+    Close-TestApp
+    # Full recovery quarantines the current bundle containing the invoking frontend.
+    $full = Join-Path $testRoot 'package2-full'
+    Run-Updater package --app (Join-Path $testRoot '0.1.2/app') --engine (Join-Path $testRoot '0.1.2/engine') --out $full --version 0.1.2
+    $current = Get-UpdateStatus
+    [System.IO.File]::WriteAllText((Join-Path $current.AppDirectory 'proof.txt'), 'damaged current')
+    Run-ManagedUpdater (Join-Path $current.EngineDirectory 'BotToucher2.Updater.exe') full-recover --manifest (Join-Path $full 'transition.json') --assets (Join-Path $full 'assets')
+    if ((Get-UpdateStatus).Pending) { throw 'Managed full recovery left a pending transaction' }
+    if ((Get-Content (Join-Path (Get-UpdateStatus).AppDirectory 'proof.txt') -Raw) -ne '0.1.2') { throw 'Full recovery did not restore verified bytes' }
+    Close-TestApp
+    Write-Host "PASS: managed current recovery and retained-engine pruning; status metadata sharing; real Windows install/update/source-mismatch/rollback/reapply and readiness. Evidence retained at $testRoot"
 } finally {
     # Only this disposable root was touched. Preserve files for inspection; close only its app.
     if ($script:seedUpdater) { Close-TestApp }

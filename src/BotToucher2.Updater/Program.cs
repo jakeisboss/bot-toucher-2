@@ -4,13 +4,54 @@ using BotToucher2.Core.Activity;
 using BotToucher2.Update;
 using BotToucher2.Updater;
 
-internal static class Program
+public static class Program
 {
     private static readonly JsonSerializerOptions Json = new() { WriteIndented = true };
     public static async Task<int> Main(string[] args)
     {
-        try { return await RunAsync(args); }
+        try { return await DispatchAsync(args); }
         catch (Exception ex) { Console.Error.WriteLine(ex.Message); return 1; }
+    }
+    private static async Task<int> DispatchAsync(string[] args)
+    {
+        if (args.Length == 0 || args[0] is "help" or "--help") return await RunAsync(args);
+        var options = Parse(args.Skip(1).ToArray());
+        var root = Path.GetFullPath(options.GetValueOrDefault("root") ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "BotToucher2"));
+        if (options.TryGetValue("dispatch-token", out var token))
+        {
+            if (!int.TryParse(Required(options, "wait-dispatch-pid"), out var parentPid)) throw new ArgumentException("Invalid dispatch parent PID.");
+            await ExternalCommandDispatch.ValidateWorkerAsync(root, AppContext.BaseDirectory, token, parentPid, args);
+            using var output = new StringWriter(); using var error = new StringWriter();
+            var originalOut = Console.Out; var originalError = Console.Error;
+            Console.SetOut(output); Console.SetError(error);
+            var code = 1;
+            try
+            {
+                await ExternalCommandDispatch.WriteResultAsync(root, token, new("Ready", null, "", ""));
+                await ExternalCommandDispatch.WaitForExitAsync(parentPid);
+                code = await RunAsync(args);
+            }
+            catch (Exception ex) { error.WriteLine(ex); }
+            finally { Console.SetOut(originalOut); Console.SetError(originalError); }
+            await ExternalCommandDispatch.WriteResultAsync(root, token, new(code == 0 ? "Completed" : "Failed", code, output.ToString(), error.ToString()));
+            try { await new ActivityLog(root).RecordAsync(code == 0 ? "UPDATE_COMMAND" : "UPDATE_ERROR", "External command " + args[0] + (code == 0 ? " completed. " : " failed: " + error + " ") + "Result: " + ExternalCommandDispatch.ResultPath(root, token), code == 0 ? "Info" : "Error"); } catch (Exception) { /* Durable result is authoritative for this command outcome. */ }
+            return code;
+        }
+        if (options.ContainsKey("wait-dispatch-pid")) throw new ArgumentException("Dispatch token required.");
+        var worker = await ExternalCommandDispatch.WorkerForAsync(args[0], root, AppContext.BaseDirectory);
+        if (worker is not null)
+        {
+            string result;
+            try { result = await ExternalCommandDispatch.StartAsync(root, worker, args); }
+            catch (Exception ex)
+            {
+                try { await new ActivityLog(root).RecordAsync("UPDATE_ERROR", ex.ToString(), "Error"); } catch (Exception) { }
+                throw;
+            }
+            Print(new { State = "Accepted", Message = "Handoff accepted; operation has NOT completed. Read the result file for final exit code and errors.", ResultPath = result });
+            return 0; // Release loaded managed binaries before the worker mutates/prunes.
+        }
+        return await RunAsync(args);
     }
     private static async Task<int> RunAsync(string[] args)
     {
@@ -123,6 +164,9 @@ internal static class Program
     private static void Package(Dictionary<string, string> options)
     {
         var output = Path.GetFullPath(Required(options, "out"));
+        var app = Path.GetFullPath(Required(options, "app")); var updater = Path.GetFullPath(Required(options, "engine"));
+        if (ExternalCommandDispatch.IsWithin(output, app) || ExternalCommandDispatch.IsWithin(app, output) || ExternalCommandDispatch.IsWithin(output, updater) || ExternalCommandDispatch.IsWithin(updater, output))
+            throw new IOException("Package output and input directories must not overlap.");
         if (Directory.Exists(output) && Directory.EnumerateFileSystemEntries(output).Any()) throw new IOException("Package output must be empty.");
         var bundle = Path.Combine(output, "bundle"); Directory.CreateDirectory(bundle);
         Copy(Required(options, "app"), Path.Combine(bundle, "app")); Copy(Required(options, "engine"), Path.Combine(bundle, "engine"));

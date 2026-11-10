@@ -3,6 +3,8 @@ using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Threading;
 using System.Windows.Input;
+using System.Windows.Media;
+using BotToucher2.Core.Activity;
 using BotToucher2.App;
 using BotToucher2.App.Controls;
 using BotToucher2.App.Views;
@@ -17,7 +19,7 @@ internal static class Program
             Source = new Uri("/BotToucher2;component/Theme.xaml", UriKind.Relative) });
         var result = 1;
         var window = new MainWindow(new ShellState(), "Preference recovery notice fixture");
-        application.Dispatcher.BeginInvoke(DispatcherPriority.ApplicationIdle, new Action(() =>
+        application.Dispatcher.BeginInvoke(DispatcherPriority.ApplicationIdle, new Action(async () =>
         {
             try
             {
@@ -62,6 +64,20 @@ internal static class Program
                 Click(window, "HomeNav");
                 Check(window.State.LeftWidth == resizedWidth, "Navigation preserves keyboard splitter width");
                 Check(Find<HardwareMonitorPanel>(window, "HardwarePanel").IsVisible, "Built-in monitor present outside widget tab");
+                var activity = new ActivityLog(System.IO.Path.Combine(System.IO.Path.GetTempPath(), "bt2-feed-" + Guid.NewGuid().ToString("N")));
+                await activity.RecordAsync("ERROR", "Diagnostic details must remain selected", "Error");
+                var feed = new ActivityFeed(activity); var feedWindow = new Window { Content = feed, Width = 500, Height = 400 };
+                feedWindow.Show();
+                var list = Descendants<ListBox>(feed).Single();
+                await Until(() => list.Items.Count == 1);
+                list.SelectedIndex = 0; var selected = list.SelectedItem;
+                await Task.Delay(2300); // Cross the real two-second DispatcherTimer refresh.
+                Check(ReferenceEquals(selected, list.SelectedItem), "Unchanged activity refresh retains selected row");
+                await activity.RecordAsync("START", "New activity arrived");
+                await Until(() => list.Items.Count == 2);
+                Check(Equals(((ListBoxItem)list.SelectedItem).Tag, ((ListBoxItem)selected).Tag), "New activity preserves the selected diagnostic");
+                Check(Descendants<TextBlock>(feed).Any(text => text.Text == "Diagnostic details must remain selected"), "Selected full diagnostic remains readable");
+                feedWindow.Close();
                 result = 0;
             }
             catch (Exception ex) { Console.Error.WriteLine(ex); }
@@ -69,6 +85,21 @@ internal static class Program
         }));
         application.Run(window);
         return result;
+    }
+    private static IEnumerable<T> Descendants<T>(DependencyObject root) where T : DependencyObject
+    {
+        for (var i = 0; i < VisualTreeHelper.GetChildrenCount(root); i++)
+        {
+            var child = VisualTreeHelper.GetChild(root, i);
+            if (child is T found) yield return found;
+            foreach (var descendant in Descendants<T>(child)) yield return descendant;
+        }
+    }
+    private static async Task Until(Func<bool> condition)
+    {
+        var deadline = DateTime.UtcNow.AddSeconds(5);
+        while (!condition() && DateTime.UtcNow < deadline) await Task.Delay(25);
+        Check(condition(), "Activity refresh completed within five seconds");
     }
     private static T Find<T>(FrameworkElement root, string name) where T : class =>
         root.FindName(name) as T ?? throw new Exception("Missing shell control: " + name);

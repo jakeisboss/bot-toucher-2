@@ -502,6 +502,100 @@ public class EngineTests
         await Assert.ThrowsAsync<InvalidDataException>(() => engine.StatusAsync());
         await Assert.ThrowsAsync<InvalidDataException>(() => engine.StageAsync(manifest, new Assets(input, manifest)));
     }
+    [Theory]
+    [InlineData("status-current-read")]
+    [InlineData("status-validated")]
+    public async Task StatusRetriesWhenCommitAndPruningOvertakeItsSnapshot(string phase)
+    {
+        var root = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N")); var input = Path.Combine(root, "input"); CreateInput(input);
+        var engineRoot = Path.Combine(root, "root"); var engine = new UpdateEngine(engineRoot); TransitionManifest? prior = null;
+        for (var i = 0; i < 2; i++)
+        {
+            File.WriteAllText(Path.Combine(input, "app", "data"), i.ToString());
+            var manifest = UpdatePlanner.CreateManifest("0.1." + i, prior?.Target, UpdatePlanner.Inventory(input), prior?.Version);
+            await engine.ApplyAsync(await engine.StageAsync(manifest, new Assets(input, manifest)), new Launcher(true)); prior = manifest;
+        }
+        File.WriteAllText(Path.Combine(input, "app", "data"), "third");
+        var next = UpdatePlanner.CreateManifest("0.1.2", prior!.Target, UpdatePlanner.Inventory(input), prior.Version);
+        var stage = await engine.StageAsync(next, new Assets(input, next)); var changed = false;
+        var reader = new UpdateEngine(engineRoot, checkpoint: p =>
+        {
+            if (p != phase || changed) return; changed = true;
+            engine.ApplyAsync(stage, new Launcher(true)).GetAwaiter().GetResult();
+        });
+        var status = await reader.StatusAsync();
+        Assert.True(changed); Assert.False(status.Pending); Assert.Equal(next.TargetId, status.Current!.InventoryId);
+    }
+    [Fact]
+    public async Task ConcurrentStatusReadersSurviveFortyUpdatesAndReceiptPruning()
+    {
+        var root = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N")); var input = Path.Combine(root, "input"); CreateInput(input);
+        var engine = new UpdateEngine(Path.Combine(root, "root")); TransitionManifest? prior = null;
+        using var done = new CancellationTokenSource(); var errors = new System.Collections.Concurrent.ConcurrentQueue<Exception>();
+        var readers = Enumerable.Range(0, 8).Select(_ => Task.Run(async () =>
+        {
+            while (!done.IsCancellationRequested) { try { await engine.StatusAsync(); } catch (Exception error) { errors.Enqueue(error); } }
+        })).ToArray();
+        try
+        {
+            for (var i = 0; i < 40; i++)
+            {
+                File.WriteAllText(Path.Combine(input, "app", "data"), i.ToString());
+                var manifest = UpdatePlanner.CreateManifest("0.1." + i, prior?.Target, UpdatePlanner.Inventory(input), prior?.Version);
+                await engine.ApplyAsync(await engine.StageAsync(manifest, new Assets(input, manifest)), new Launcher(true)); prior = manifest;
+            }
+        }
+        finally { done.Cancel(); await Task.WhenAll(readers); }
+        Assert.Empty(errors); Assert.Equal("0.1.39", (await engine.StatusAsync()).Current!.Version);
+    }
+    [Fact]
+    public async Task StatusStillRejectsStableMissingReceipt()
+    {
+        var root = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N")); var input = Path.Combine(root, "input"); CreateInput(input);
+        var engineRoot = Path.Combine(root, "root"); var engine = new UpdateEngine(engineRoot);
+        var manifest = UpdatePlanner.CreateManifest("0.1", null, UpdatePlanner.Inventory(input));
+        await engine.ApplyAsync(await engine.StageAsync(manifest, new Assets(input, manifest)), new Launcher(true));
+        File.Delete(Assert.Single(Directory.GetFiles(Path.Combine(engineRoot, "updates", "transactions"), "*.receipt.json")));
+        await Assert.ThrowsAsync<InvalidDataException>(() => engine.StatusAsync());
+    }
+    [Fact]
+    public async Task StatusReturnsBusyAfterBoundedRepeatedTransitions()
+    {
+        var root = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N")); var input = Path.Combine(root, "input"); CreateInput(input);
+        var engineRoot = Path.Combine(root, "root"); var engine = new UpdateEngine(engineRoot); var transitions = 0;
+        var prior = UpdatePlanner.CreateManifest("0.1.0", null, UpdatePlanner.Inventory(input));
+        await engine.ApplyAsync(await engine.StageAsync(prior, new Assets(input, prior)), new Launcher(true));
+        var reader = new UpdateEngine(engineRoot, checkpoint: p =>
+        {
+            if (p != "status-current-read") return;
+            File.WriteAllText(Path.Combine(input, "app", "data"), (++transitions).ToString());
+            var next = UpdatePlanner.CreateManifest("0.1." + transitions, prior.Target, UpdatePlanner.Inventory(input), prior.Version);
+            var stage = engine.StageAsync(next, new Assets(input, next)).GetAwaiter().GetResult();
+            engine.ApplyAsync(stage, new Launcher(true)).GetAwaiter().GetResult(); prior = next;
+        });
+        var status = await reader.StatusAsync();
+        Assert.True(status.Pending); Assert.Null(status.Current); Assert.Equal(8, transitions);
+        Assert.False((await engine.StatusAsync()).Pending);
+    }
+    [Fact]
+    public async Task CandidateStatusDoesNotWaitForMutationLeaseDuringReadiness()
+    {
+        var root = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N")); var input = Path.Combine(root, "input"); CreateInput(input);
+        var engine = new UpdateEngine(Path.Combine(root, "root")); var manifest = UpdatePlanner.CreateManifest("0.1", null, UpdatePlanner.Inventory(input));
+        var launcher = new WaitingLauncher(); var apply = engine.ApplyAsync(await engine.StageAsync(manifest, new Assets(input, manifest)), launcher);
+        await launcher.Entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        try { Assert.True((await engine.StatusAsync().WaitAsync(TimeSpan.FromSeconds(2))).Pending); }
+        finally { launcher.Ready.TrySetResult(true); }
+        await apply; Assert.False((await engine.StatusAsync()).Pending);
+    }
+    private sealed class WaitingLauncher : IApplicationLauncher
+    {
+        public TaskCompletionSource<bool> Entered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource<bool> Ready { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public bool IsRunning => true;
+        public Task<bool> LaunchAsync(string directory, string token, CancellationToken ct) { Entered.TrySetResult(true); return Ready.Task; }
+        public Task StopAsync(CancellationToken ct) => Task.CompletedTask;
+    }
     private static void CreateInput(string input)
     {
         Directory.CreateDirectory(Path.Combine(input, "app")); Directory.CreateDirectory(Path.Combine(input, "engine"));
