@@ -33,7 +33,7 @@ jobs:
           try {
             $lines = @(gh api --allow-escape-sequences repos/jakeisboss/bot-toucher-2/actions/jobs/130191778884/logs 2>&1)
             $result = $LASTEXITCODE
-            $lines = @($lines | ForEach-Object { $_.ToString() -replace '\[[0-?]*[ -/]*[@-~]', '' })
+            $lines = @($lines | ForEach-Object { $_.ToString() -replace '\x1b\[[0-?]*[ -/]*[@-~]', '' })
             if ($result -ne 0) { $details = ($lines | Out-String) }
             else { $details = ($lines | Select-String -Pattern 'Managed inventory|Candidate|readiness|Updater failed|could not|Exception|mismatch|denied|cannot|source install' -Context 3,3 | Select-Object -Last 30 | Out-String) }
           } catch { $details = ($_ | Out-String) }
