@@ -85,6 +85,8 @@ public static class ExternalCommandDispatch
         }
         catch (FileNotFoundException) { return null; }
         catch (DirectoryNotFoundException) { return null; }
+        catch (IOException error) when (error.HResult is unchecked((int)0x80070020) or unchecked((int)0x80070021))
+        { return null; } // Replacement is in progress; callers already bound their polling.
     }
     public static async Task<string> StartAsync(string root, string worker, string[] args)
     {

@@ -526,6 +526,46 @@ public class EngineTests
         var status = await reader.StatusAsync();
         Assert.True(changed); Assert.False(status.Pending); Assert.Equal(next.TargetId, status.Current!.InventoryId);
     }
+    [Theory]
+    [InlineData(32)] [InlineData(33)]
+    public async Task StatusBoundsTransientWindowsSharingAndLockViolations(int nativeError)
+    {
+        var attempts = 0;
+        var engine = new UpdateEngine(Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N")), checkpoint: phase =>
+        {
+            if (phase != "status-current-read") return;
+            attempts++; throw new IOException("Transient metadata lock", unchecked((int)(0x80070000u | (uint)nativeError)));
+        });
+        var status = await engine.StatusAsync().WaitAsync(TimeSpan.FromSeconds(2));
+        Assert.True(status.Pending); Assert.Null(status.Current); Assert.Equal(8, attempts);
+    }
+    [Theory]
+    [InlineData(5)] [InlineData(23)] [InlineData(1117)]
+    public async Task StatusDoesNotSuppressOtherMetadataIoFailures(int nativeError)
+    {
+        var attempts = 0;
+        var engine = new UpdateEngine(Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N")), checkpoint: phase =>
+        {
+            if (phase != "status-current-read") return;
+            attempts++; throw new IOException("Stable metadata failure", unchecked((int)(0x80070000u | (uint)nativeError)));
+        });
+        var error = await Assert.ThrowsAsync<IOException>(() => engine.StatusAsync());
+        Assert.Equal(nativeError, error.HResult & 0xffff); Assert.Equal(1, attempts);
+    }
+    [WindowsSharingFact]
+    public async Task StatusIsBusyWhileCurrentHasExclusiveWindowsHandleThenRecovers()
+    {
+        var root = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N")); var input = Path.Combine(root, "input"); CreateInput(input);
+        var engineRoot = Path.Combine(root, "root"); var engine = new UpdateEngine(engineRoot);
+        var manifest = UpdatePlanner.CreateManifest("0.1", null, UpdatePlanner.Inventory(input));
+        await engine.ApplyAsync(await engine.StageAsync(manifest, new Assets(input, manifest)), new Launcher(true));
+        using (var locked = new FileStream(Path.Combine(engineRoot, "install", "current.json"), FileMode.Open, FileAccess.Read, FileShare.None))
+        {
+            var status = await engine.StatusAsync().WaitAsync(TimeSpan.FromSeconds(2));
+            Assert.True(status.Pending); Assert.Null(status.Current);
+        }
+        var recovered = await engine.StatusAsync(); Assert.False(recovered.Pending); Assert.Equal(manifest.TargetId, recovered.Current!.InventoryId);
+    }
     [Fact]
     public async Task CommitReplacesCurrentWhilePriorMetadataReaderRemainsOpen()
     {
@@ -635,4 +675,9 @@ public class EngineTests
     {
         public Task<Stream> OpenAsync(string assetName, CancellationToken cancellationToken) => Task.FromResult<Stream>(File.OpenRead(Path.Combine(root, manifest.Target.First(f => f.Sha256 == assetName).Path.Replace('/', Path.DirectorySeparatorChar))));
     }
+}
+
+public sealed class WindowsSharingFactAttribute : FactAttribute
+{
+    public WindowsSharingFactAttribute() { if (!OperatingSystem.IsWindows()) Skip = "Requires native Windows sharing violations."; }
 }

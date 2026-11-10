@@ -271,21 +271,30 @@ public sealed class UpdateEngine
         for (var attempt = 0; attempt < 8; attempt++)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var before = await ReadMetadata(CurrentPath, cancellationToken);
-            var pendingBefore = File.Exists(JournalPath);
-            InstallRecord? record = null; Exception? failure = null;
             try
             {
-                checkpoint?.Invoke("status-current-read");
-                record = await ValidateCurrent(before is null ? null : DecodeMetadata<InstallRecord>(before), cancellationToken);
-                checkpoint?.Invoke("status-validated");
+                var before = await ReadMetadata(CurrentPath, cancellationToken);
+                var pendingBefore = File.Exists(JournalPath);
+                InstallRecord? record = null; Exception? failure = null;
+                try
+                {
+                    checkpoint?.Invoke("status-current-read");
+                    record = await ValidateCurrent(before is null ? null : DecodeMetadata<InstallRecord>(before), cancellationToken);
+                    checkpoint?.Invoke("status-validated");
+                }
+                catch (Exception error) when (error is IOException or InvalidDataException or JsonException) { failure = error; }
+                var pendingAfter = File.Exists(JournalPath);
+                var after = await ReadMetadata(CurrentPath, cancellationToken);
+                if (pendingBefore != pendingAfter || !((before is null && after is null) || (before is not null && after is not null && before.AsSpan().SequenceEqual(after)))) continue;
+                if (failure is not null) System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(failure).Throw();
+                return new(record?.Current.Identity, record?.Previous?.Identity, record is null ? null : Path.Combine(Bundle(record.Current.Identity.InventoryId), "app"), record is null ? null : Path.Combine(Bundle(record.Current.Identity.InventoryId), "engine"), pendingAfter, record?.DisplacedStateSnapshot is null ? null : Path.Combine(SnapshotRoot(record.DisplacedStateSnapshot), "app"));
             }
-            catch (Exception error) when (error is IOException or InvalidDataException or JsonException) { failure = error; }
-            var pendingAfter = File.Exists(JournalPath);
-            var after = await ReadMetadata(CurrentPath, cancellationToken);
-            if (pendingBefore != pendingAfter || !((before is null && after is null) || (before is not null && after is not null && before.AsSpan().SequenceEqual(after)))) continue;
-            if (failure is not null) System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(failure).Throw();
-            return new(record?.Current.Identity, record?.Previous?.Identity, record is null ? null : Path.Combine(Bundle(record.Current.Identity.InventoryId), "app"), record is null ? null : Path.Combine(Bundle(record.Current.Identity.InventoryId), "engine"), pendingAfter, record?.DisplacedStateSnapshot is null ? null : Path.Combine(SnapshotRoot(record.DisplacedStateSnapshot), "app"));
+            catch (IOException error) when (error.HResult is unchecked((int)0x80070020) or unchecked((int)0x80070021))
+            {
+                // ReplaceFile briefly owns its replacement handle exclusively. Polling
+                // may observe sharing/lock violations even though readers share deletion.
+                await Task.Delay(5, cancellationToken);
+            }
         }
         // A continuously changing installation is busy, never a false nonpending old selection.
         return new(null, null, null, null, true);

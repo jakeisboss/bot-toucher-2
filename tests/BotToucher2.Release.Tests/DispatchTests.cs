@@ -40,6 +40,25 @@ public sealed class DispatchTests
         var result = await ExternalCommandDispatch.ReadResultAsync(root, token);
         Assert.Equal("Failed", result!.State); Assert.Equal(1, result.ExitCode); Assert.Equal("candidate failed", result.Error); Assert.Equal("output", result.Output);
     }
+    [WindowsSharingFact]
+    public async Task ResultPollingRemainsPendingDuringExclusiveWindowsHandleThenRecovers()
+    {
+        var root = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N")); var token = new string('f', 32);
+        await ExternalCommandDispatch.WriteResultAsync(root, token, new("Completed", 0, "finished", ""));
+        using (var locked = new FileStream(ExternalCommandDispatch.ResultPath(root, token), FileMode.Open, FileAccess.Read, FileShare.None))
+            Assert.Null(await ExternalCommandDispatch.ReadResultAsync(root, token));
+        Assert.Equal("Completed", (await ExternalCommandDispatch.ReadResultAsync(root, token))!.State);
+    }
+    [Fact]
+    public async Task ResultPollingDoesNotMaskCorruptionOrAccessFailure()
+    {
+        var root = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N")); var token = new string('f', 32);
+        await ExternalCommandDispatch.WriteResultAsync(root, token, new("Ready", null, "", ""));
+        var path = ExternalCommandDispatch.ResultPath(root, token); await File.WriteAllTextAsync(path, "{");
+        await Assert.ThrowsAsync<System.Text.Json.JsonException>(() => ExternalCommandDispatch.ReadResultAsync(root, token));
+        File.Delete(path); Directory.CreateDirectory(path);
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => ExternalCommandDispatch.ReadResultAsync(root, token));
+    }
     [Fact]
     public async Task CompletedResultReplacesReadyWhilePollingReaderRemainsOpen()
     {
@@ -156,4 +175,9 @@ public sealed class DispatchTests
     {
         public Task<Stream> OpenAsync(string name, CancellationToken ct) => Task.FromResult<Stream>(File.OpenRead(Path.Combine(input, manifest.Target.First(x => x.Sha256 == name).Path)));
     }
+}
+
+public sealed class WindowsSharingFactAttribute : FactAttribute
+{
+    public WindowsSharingFactAttribute() { if (!OperatingSystem.IsWindows()) Skip = "Requires native Windows sharing violations."; }
 }
