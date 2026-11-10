@@ -6,6 +6,7 @@ namespace BotToucher2.Updater;
 public sealed class WindowsApplicationLauncher(string root) : IApplicationLauncher, IDisposable
 {
     private Process? _candidate;
+    public bool IsRunning => HasActiveApplication;
     public bool HasActiveApplication => _candidate is not null && !_candidate.HasExited;
     public async Task<bool> LaunchAsync(string appDirectory, string transactionToken, CancellationToken cancellationToken)
     {

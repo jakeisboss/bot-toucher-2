@@ -1,6 +1,11 @@
 name: BT2 0.1 Windows validation
 on:
   workflow_dispatch:
+    inputs:
+      publish_release:
+        description: 'Publish v0.1.0 Release assets only after Windows checks pass'
+        type: boolean
+        default: false
 permissions:
   contents: read
 jobs:
@@ -18,3 +23,20 @@ jobs:
       - name: Actual disposable update rollback reapply
         shell: pwsh
         run: ./tools/test-update-windows.ps1
+  publish:
+    if: ${{ inputs.publish_release }}
+    needs: windows
+    runs-on: windows-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.428'
+      - name: Publish explicit GitHub Release assets
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: ./tools/publish-release.ps1 -Version 0.1.0

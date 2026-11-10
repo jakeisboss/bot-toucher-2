@@ -90,6 +90,12 @@ public partial class MainWindow : Window
         NoticeText.Text = notice; NoticeBorder.Visibility = Visibility.Visible;
     }
     public void SetHardwareObservation(HardwareObservation observation) => HardwarePanel.SetObservation(observation);
+    public void SetUpdatePending(bool pending)
+    {
+        // Disable edits while preserving the native window close control.
+        if (Content is UIElement content) content.IsEnabled = !pending;
+        StatusText.Text = pending ? "Waiting for updater commit — no state edits are enabled" : "Shell ready";
+    }
     public void BeginShutdown()
     {
         IsEnabled = false;

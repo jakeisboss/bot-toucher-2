@@ -16,7 +16,7 @@ internal static class Program
     {
         if (args.Length == 0 || args[0] is "help" or "--help")
         {
-            Console.WriteLine("BT2 updater: status | check | install-release | full-recover --manifest FILE --assets DIR | install --manifest FILE --assets DIR | stage --manifest FILE --assets DIR | apply --stage ID | rollback | recover | launch | package --app DIR --engine DIR --out DIR --version X [--source MANIFEST]. Optional --root DIR; apply/rollback accept --wait-pid PID. No operation runs automatically.");
+            Console.WriteLine("BT2 updater: status | check | install-release | full-recover --manifest FILE --assets DIR | install --manifest FILE --assets DIR | stage --manifest FILE --assets DIR | apply --stage ID | rollback | recover | acknowledge-state --confirm state-saved | launch | package --app DIR --engine DIR --out DIR --version X [--source MANIFEST]. Optional --root DIR; apply/rollback accept --wait-pid PID. No operation runs automatically.");
             return 0;
         }
         var options = Parse(args.Skip(1).ToArray());
@@ -56,6 +56,10 @@ internal static class Program
                 case "apply": await engine.ApplyAsync(Required(options, "stage"), launcher); break;
                 case "rollback": await engine.RollbackAsync(launcher); break;
                 case "recover": await engine.RecoverAsync(launcher); break;
+                case "acknowledge-state":
+                    if (Required(options, "confirm") != "state-saved") throw new ArgumentException("First save the displaced state externally, then use --confirm state-saved. Later transactions may rotate it.");
+                    await engine.AcknowledgeDisplacedStateAsync();
+                    break;
                 case "launch":
                     var status = await engine.StatusAsync();
                     if (status.Pending) throw new InvalidOperationException("A pending update requires explicit recover before launch.");

@@ -21,6 +21,8 @@ public partial class App : Application
     private bool _closing;
     private bool _allowClose;
     private bool _candidateWaiting;
+    private bool _candidateFailed;
+    private int? _helperPid;
     protected override async void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
@@ -38,13 +40,20 @@ public partial class App : Application
             var preferencesPath = Path.Combine(state, "layout.json");
             var readyToken = Option(e.Args, "--bt2-ready");
             var legacy = Path.Combine(root, "layout.json");
+            string? importNotice = null;
             if (readyToken is null && !File.Exists(preferencesPath) && File.Exists(legacy))
             {
-                File.Copy(legacy, preferencesPath, overwrite: false);
-                await Record("PREFERENCES_IMPORT", "Imported 0.0 shell preferences; original layout.json retained.");
+                try
+                {
+                    File.Copy(legacy, preferencesPath, overwrite: false);
+                    await Record("PREFERENCES_IMPORT", "Imported 0.0 shell preferences; original layout.json retained.");
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                { importNotice = "Original preferences could not be imported; preserved with saving disabled: " + ex.Message; }
             }
             _preferences = new ShellPreferences(preferencesPath);
             var loaded = await _preferences.LoadAsync();
+            if (importNotice is not null) { loaded = new PreferenceLoad(loaded.State, importNotice); _preferences = null; }
             if (readyToken is not null && !File.Exists(preferencesPath) && File.Exists(legacy))
             {
                 // Inspect/migrate legacy bytes in memory before readiness, without writing state.
@@ -81,9 +90,10 @@ public partial class App : Application
             if (readyToken is not null)
             {
                 if (readyToken.Length != 32 || readyToken.Any(c => !Uri.IsHexDigit(c) || char.IsUpper(c))) throw new InvalidDataException("Invalid candidate readiness token.");
-                _candidateWaiting = true; window.IsEnabled = false;
+                _candidateWaiting = true; window.SetUpdatePending(true);
                 var helperPidText = Option(e.Args, "--bt2-helper-pid");
                 if (!int.TryParse(helperPidText, out var helperPid) || helperPid <= 0) throw new InvalidDataException("Missing candidate helper identity.");
+                _helperPid = helperPid;
                 window.Loaded += async (_, _) => await AcknowledgeReady(root, readyToken, helperPid, window);
             }
             window.Show();
@@ -109,7 +119,6 @@ public partial class App : Application
             // Read-only protocol wait: only the helper may commit or recover a transaction.
             var engine = new UpdateEngine(root);
             using var helper = FindHelper(helperPid);
-            var limit = DateTime.UtcNow.AddMinutes(2);
             while (!_closing)
             {
                 var status = await Task.Run(() => engine.StatusAsync());
@@ -126,6 +135,7 @@ public partial class App : Application
                             File.Copy(legacyPath, statePath, overwrite: false);
                             _preferences = new ShellPreferences(statePath);
                             var imported = await _preferences.LoadAsync();
+                            window.RestoreLayout(imported.State);
                             if (imported.Notice is not null) window.ShowNotice(imported.Notice);
                             await Record("PREFERENCES_IMPORT", "Persisted previously inspected 0.0 preferences after commit; original retained.");
                         }
@@ -136,19 +146,22 @@ public partial class App : Application
                             await Record("PREFERENCES_IMPORT_ERROR", ex.Message, "Warning");
                         }
                     }
-                    _candidateWaiting = false; window.IsEnabled = true;
+                    _candidateWaiting = false; window.SetUpdatePending(false);
                     await Record("APPLICATION_READY", "Application initialized and the helper confirmed the active installation.");
                     return;
                 }
-                if (helper is null || helper.HasExited || DateTime.UtcNow >= limit) throw new IOException("The updater stopped before the transaction completed. Run explicit external recover.");
+                if (helper is null || helper.HasExited) throw new IOException("The updater stopped before the transaction completed. Run explicit external recover.");
                 await Task.Delay(100, _stop.Token);
             }
         }
         catch (OperationCanceledException) when (_stop.IsCancellationRequested) { }
         catch (Exception ex)
         {
+            _candidateFailed = true;
             await Record("READINESS_ERROR", ex.Message, "Error");
             window.ShowNotice("Candidate readiness failed: " + ex.Message);
+            if (!_closing)
+                MessageBox.Show(window, "The update candidate could not finish initialization. " + ex.Message + "\nRun the external updater with status/recover. No preferences will be saved by this candidate.", "Bot Toucher 2 — recovery required", MessageBoxButton.OK, MessageBoxImage.Error);
             window.Close();
         }
     }
@@ -156,6 +169,15 @@ public partial class App : Application
     {
         if (_allowClose) return;
         e.Cancel = true;
+        if (_candidateWaiting && !_candidateFailed && _helperPid is { } pid)
+        {
+            using var helper = FindHelper(pid);
+            if (helper is not null && !helper.HasExited)
+            {
+                (sender as MainWindow)?.ShowNotice("The updater is completing the transaction. Close is deferred until commit; if the helper stops, external recovery remains available.");
+                return;
+            }
+        }
         if (_closing || sender is not MainWindow window) return;
         _closing = true; window.BeginShutdown(); _stop.Cancel();
         try { if (_monitorTask is not null) await _monitorTask; }

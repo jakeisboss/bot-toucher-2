@@ -49,7 +49,7 @@ public sealed class UpdateController : IDisposable
                 HandoffRequested(operation == "install" ? "apply" : "rollback", stage, worker);
                 return "Staging verified. Closing BT2 for the external transaction…";
             }
-            return $"Current version: {_status.Current?.Version ?? "0.1.0 (unmanaged build)"}\nLatest compatible: {_available?.Manifest.Version ?? "Not checked / no compatible release"}\nRequired payload: {(_available is null ? "Not available" : _available.Manifest.RequiredBytes + " bytes")}\nPrevious known-good: {_status.Previous?.Version ?? "None"}\n{(_status.Pending ? "Pending transaction: run external recover before proceeding." : "")}\n\n{_available?.Notes}";
+            return $"Current version: {_status.Current?.Version ?? "0.1.0 (unmanaged build)"}\nLatest compatible: {_available?.Manifest.Version ?? "Not checked / no compatible release"}\nRequired payload: {(_available is null ? "Not available" : _available.Manifest.RequiredBytes + " bytes")}\nPrevious known-good: {_status.Previous?.Version ?? "None"}\nDisplaced state recovery: {_status.DisplacedStateDirectory ?? "None"}\n{(_status.Pending ? "Pending transaction: run external recover before proceeding." : "")}\n\n{_available?.Notes}";
         }
         catch (Exception ex)
         {

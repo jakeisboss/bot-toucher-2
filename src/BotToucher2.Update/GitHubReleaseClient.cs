@@ -116,7 +116,8 @@ public sealed class GitHubReleaseClient(HttpClient http)
         {
             if (!assets.TryGetValue(assetName, out var uri)) throw new InvalidDataException("Required payload asset is missing from the release.");
             var response = await owner.Send(uri, cancellationToken);
-            return new ResponseStream(await response.Content.ReadAsStreamAsync(cancellationToken), response);
+            try { return new ResponseStream(await response.Content.ReadAsStreamAsync(cancellationToken), response); }
+            catch { response.Dispose(); throw; }
         }
     }
     private sealed class ResponseStream(Stream inner, HttpResponseMessage response) : Stream
