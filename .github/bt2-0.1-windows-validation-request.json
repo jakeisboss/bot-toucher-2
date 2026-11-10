@@ -1,8 +1,8 @@
 {
   "Version": "0.1.0",
-  "PublishRelease": true,
-  "ReviewedSourceCommit": "326b169",
+  "PublishRelease": false,
+  "ReviewedSourceCommit": "a60c9ba",
   "Scope": "One explicit targeted Windows validation and gated GitHub Release publication; no widget/packet/execution work.",
-  "Attempt": 7,
-  "Reason": "Initial native installation and detached launch succeeded; expose exact next-transition error without changing product code."
+  "Attempt": 8,
+  "Reason": "Native full transaction passed; retrieve exact preceding failed-run error and repeat verification before publication."
 }
