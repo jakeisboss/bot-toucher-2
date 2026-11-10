@@ -26,7 +26,7 @@ public sealed class ShellTests : IDisposable
         var initial = await store.LoadAsync();
         Assert.Null(initial.Notice);
         var state = new ShellState { Destination = Destination.PacketCenter, PacketSection = PacketSection.UpdateCenter,
-            LeftVisible = false, RightVisible = false, LeftWidth = 220, RightWidth = 320, RightTab = RailTab.Widgets };
+            LeftVisible = false, RightVisible = false, LeftWidth = 220, RightWidth = 320, RightTab = RailTab.Context };
         Assert.Null(await store.SaveAsync(state));
         var loaded = await new ShellPreferences(StatePath).LoadAsync();
         Assert.Equal(state, loaded.State);
@@ -63,6 +63,15 @@ public sealed class ShellTests : IDisposable
         await File.WriteAllTextAsync(temporary, "app layout");
         await Assert.ThrowsAsync<IOException>(() => PreferenceCommit.ReplaceAsync(StatePath, temporary, null));
         Assert.Equal("external new file", await File.ReadAllTextAsync(StatePath));
+    }
+    [Fact] public async Task Legacy_right_tab_is_mapped_to_context_without_losing_original_bytes()
+    {
+        var bytes = System.Text.Json.JsonSerializer.Serialize(new ShellState { RightTab = (RailTab)1 });
+        await File.WriteAllTextAsync(StatePath, bytes);
+        var loaded = await new ShellPreferences(StatePath).LoadAsync();
+        Assert.Equal(RailTab.Context, loaded.State.RightTab);
+        Assert.NotNull(loaded.Notice);
+        Assert.Equal(bytes, await File.ReadAllTextAsync(StatePath));
     }
     [Fact] public async Task Externally_changed_preferences_are_not_overwritten()
     {

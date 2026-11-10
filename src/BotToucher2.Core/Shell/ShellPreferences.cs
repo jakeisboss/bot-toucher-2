@@ -23,9 +23,13 @@ public sealed class ShellPreferences(string path)
                 _baseline = await ReadExistingAsync();
                 var state = _baseline is null ? new ShellState() :
                     JsonSerializer.Deserialize<ShellState>(_baseline, Options) ?? throw new JsonException("Empty layout.");
+                // Schema 1 used value 1 for the removed right-rail tab. Normalize only
+                // that known historical value; all other schema validation still applies.
+                var legacyTab = state.SchemaVersion == 1 && (int)state.RightTab == 1;
+                if (legacyTab) state = state with { RightTab = RailTab.Context };
                 state.Validate();
                 _safeToSave = true;
-                return new(state, null);
+                return new(state, legacyTab ? "The old right-rail tab selection was migrated to Context." : null);
             }
             catch (Exception ex) when (ex is JsonException or ArgumentException or IOException or UnauthorizedAccessException)
             {

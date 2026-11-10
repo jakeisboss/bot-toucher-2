@@ -38,17 +38,12 @@ internal static class Program
                 tabs.SelectedIndex = 2; Check(window.State.PacketSection == PacketSection.Activity, "Activity destination");
                 tabs.SelectedIndex = 0; Check(window.State.PacketSection == PacketSection.Project, "Project destination");
                 tabs.SelectedIndex = 1; Click(packets, "OpenUpdateCenter");
-                Check(window.State.PacketSection == PacketSection.UpdateCenter && Find<FrameworkElement>(packets, "UpdateSurface").IsVisible,
-                    "Update Center destination");
-                Click(packets, "BackToPackets"); Check(window.State.PacketSection == PacketSection.Packets, "Return to Packets");
+                Check(window.State.Destination == Destination.Settings, "Old update entry links to Settings");
                 Click(window, "ToggleLeft"); Check(!window.State.LeftVisible && !Find<FrameworkElement>(window, "LeftRail").IsVisible, "Hide left rail");
                 Click(window, "ToggleLeft"); Check(window.State.LeftVisible && Find<FrameworkElement>(window, "LeftRail").IsVisible, "Restore left rail");
                 Click(window, "ToggleRight"); Check(!window.State.RightVisible && !Find<FrameworkElement>(window, "RightRail").IsVisible, "Hide right rail");
                 Click(window, "ToggleRight"); Check(window.State.RightVisible && Find<FrameworkElement>(window, "RightRail").IsVisible, "Restore right rail");
-                Find<TabControl>(window, "RightTabs").SelectedIndex = 1;
-                Check(window.State.RightTab == RailTab.Widgets, "Widgets destination");
-                Find<TabControl>(window, "RightTabs").SelectedIndex = 0;
-                Check(window.State.RightTab == RailTab.Context, "Context destination");
+                Check(window.FindName("RightTabs") is null, "Right rail has no widget tab");
                 window.Width = window.MinWidth; window.Height = window.MinHeight; window.UpdateLayout();
                 Check(Find<ContentControl>(window, "WorkspaceHost").ActualWidth >= 260, "Minimum-size workspace remains usable");
                 Find<ColumnDefinition>(window, "LeftColumn").Width = new GridLength(240); window.UpdateLayout();

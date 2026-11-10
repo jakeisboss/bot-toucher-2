@@ -6,6 +6,7 @@ using System.Windows.Input;
 using System.Windows.Media;
 using BotToucher2.App.Views;
 using BotToucher2.Core.Hardware;
+using BotToucher2.Core.Activity;
 using BotToucher2.Core.Shell;
 namespace BotToucher2.App;
 
@@ -17,27 +18,35 @@ public partial class MainWindow : Window
     private bool _updating;
     private bool _ready;
     public ShellState State { get; private set; }
-    public MainWindow(ShellState initialState, string? notice)
+    public MainWindow(ShellState initialState, string? notice, string? root = null, ActivityLog? activity = null, UpdateController? updates = null)
     {
         initialState.Validate();
         State = initialState;
         InitializeComponent();
         _packets = new PacketCenterView();
-        _packets.SectionSelected += section => ApplyState(State with { PacketSection = section });
-        _settings = new SettingsView((left, right) => ApplyState(State with { LeftVisible = left, RightVisible = right }));
+        _packets.SectionSelected += section =>
+        {
+            if (section == PacketSection.UpdateCenter) OpenUpdates();
+            else ApplyState(State with { PacketSection = section });
+        };
+        root ??= System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "BotToucher2");
+        activity ??= new ActivityLog(root);
+        _settings = new SettingsView((left, right) => ApplyState(State with { LeftVisible = left, RightVisible = right }), updates);
         _surfaces = new()
         {
-            [Destination.Home] = new WorkspaceSurface("Home", "Your local workspace. No workload is loaded.", true),
+            [Destination.Home] = new HomeView(root, activity),
             [Destination.PacketCenter] = _packets,
             [Destination.Data] = new WorkspaceSurface("Data", "Data functionality is reserved for a later version."),
             [Destination.Lab] = new WorkspaceSurface("Lab", "A clean test workspace for future systems.", true),
             [Destination.Settings] = _settings,
-            [Destination.Help] = new WorkspaceSurface("Help / About", "Bot Toucher 2 • Version 0.0.0\nWindows shell\n\nCtrl+1 Home • Ctrl+2 Packet Center • Ctrl+3 Data • Ctrl+4 Lab\nCtrl+, Settings • F1 Help\nCtrl+Shift+L toggles the left rail • Ctrl+L toggles the right rail\n\nThe hardware monitor observes this computer. Unsupported metrics are shown as unavailable.")
+            [Destination.Help] = new WorkspaceSurface("Help / About", "Bot Toucher 2 • Version 0.1.0\nWindows shell\n\nCtrl+1 Home • Ctrl+2 Packet Center • Ctrl+3 Data • Ctrl+4 Lab\nCtrl+, Settings • F1 Help\nCtrl+Shift+L toggles the left rail • Ctrl+L toggles the right rail\n\nThe hardware monitor observes this computer. Unsupported metrics are shown as unavailable.")
         };
         LeftSplitter.AddHandler(Keyboard.KeyDownEvent, new KeyEventHandler(RailKeyDown), handledEventsToo: true);
         RightSplitter.AddHandler(Keyboard.KeyDownEvent, new KeyEventHandler(RailKeyDown), handledEventsToo: true);
         _ready = true;
-        ApplyState(initialState);
+        if (initialState.Destination == Destination.PacketCenter && initialState.PacketSection == PacketSection.UpdateCenter)
+            OpenUpdates();
+        else ApplyState(initialState);
         if (notice is not null) ShowNotice(notice);
     }
     private void ApplyState(ShellState state)
@@ -51,7 +60,6 @@ public partial class MainWindow : Window
             ConfigureRail(RightColumn, RightDivider, RightRail, RightSplitter, state.RightVisible, state.RightWidth, 220);
             ToggleLeft.Content = state.LeftVisible ? "Hide left rail" : "Show left rail";
             ToggleRight.Content = state.RightVisible ? "Hide right rail" : "Show right rail";
-            RightTabs.SelectedIndex = state.RightTab == RailTab.Context ? 0 : 1;
             _packets.ShowSection(state.PacketSection);
             _settings.ShowState(state);
             WorkspaceHost.Content = _surfaces[state.Destination];
@@ -76,6 +84,7 @@ public partial class MainWindow : Window
         divider.Width = new GridLength(visible ? 5 : 0);
         rail.Visibility = splitter.Visibility = visible ? Visibility.Visible : Visibility.Collapsed;
     }
+    public void RestoreLayout(ShellState state) => ApplyState(state);
     public void ShowNotice(string notice)
     {
         NoticeText.Text = notice; NoticeBorder.Visibility = Visibility.Visible;
@@ -93,10 +102,10 @@ public partial class MainWindow : Window
     }
     private void ToggleLeftClicked(object sender, RoutedEventArgs e) => ApplyState(State with { LeftVisible = !State.LeftVisible });
     private void ToggleRightClicked(object sender, RoutedEventArgs e) => ApplyState(State with { RightVisible = !State.RightVisible });
-    private void RightTabChanged(object sender, SelectionChangedEventArgs e)
+    public void OpenUpdates()
     {
-        if (_ready && !_updating && e.Source == RightTabs)
-            ApplyState(State with { RightTab = RightTabs.SelectedIndex == 1 ? RailTab.Widgets : RailTab.Context });
+        ApplyState(State with { Destination = Destination.Settings, PacketSection = PacketSection.Packets });
+        _settings.OpenUpdates();
     }
     private void RailDragCompleted(object sender, DragCompletedEventArgs e)
     {

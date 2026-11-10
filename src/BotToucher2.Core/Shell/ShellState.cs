@@ -2,7 +2,7 @@ using System.Text.Json.Serialization;
 namespace BotToucher2.Core.Shell;
 public enum Destination { Home, PacketCenter, Data, Lab, Settings, Help }
 public enum PacketSection { Project, Packets, Activity, UpdateCenter }
-public enum RailTab { Context, Widgets }
+public enum RailTab { Context }
 [JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
 public sealed record ShellState
 {
