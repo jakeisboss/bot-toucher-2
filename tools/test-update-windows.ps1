@@ -26,8 +26,11 @@ function Run-DotNet {
     Milestone "dotnet command completed: $args"
 }
 function Run-Updater {
-    & $script:seedUpdater @args --root $script:installRoot
-    if ($LASTEXITCODE -ne 0) { throw "Updater failed: $args" }
+    $PSNativeCommandUseErrorActionPreference = $false
+    $lines = @(& $script:seedUpdater @args --root $script:installRoot 2>&1)
+    $result = $LASTEXITCODE
+    $lines | ForEach-Object { Write-Host $_ }
+    if ($result -ne 0) { throw ("Updater failed: $args`n" + (($lines | Select-Object -Last 80) -join "`n")) }
     Milestone "Updater command completed: $args"
 }
 function Read-SharedJson {
