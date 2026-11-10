@@ -1,8 +1,8 @@
 {
   "Version": "0.1.0",
   "PublishRelease": true,
-  "ReviewedSourceCommit": "70c970d52d88346e2493fad2a2cd6bbc32198d78",
+  "ReviewedSourceCommit": "59dccb5000b45164a705bef248ea4c12422fed4c",
   "Scope": "One explicit targeted Windows validation and gated GitHub Release publication; no widget/packet/execution work.",
-  "Attempt": 5,
-  "Reason": "Quote MSBuild version arguments passed through PowerShell wrappers; retain green native tests and run actual transactions/publication."
+  "Attempt": 6,
+  "Reason": "Isolate verified Windows worker/application output handles; preserve EOF and complete real transaction assertions, then gated publication."
 }

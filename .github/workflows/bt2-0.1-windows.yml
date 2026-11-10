@@ -9,15 +9,29 @@ on:
   push:
     branches: [bt2-0.1-foundation]
     paths: [.github/bt2-0.1-windows-validation-request.json]
+concurrency:
+  group: bt2-0.1-explicit-validation-${{ github.ref }}
+  cancel-in-progress: true
 permissions:
   contents: read
 jobs:
   windows:
     runs-on: windows-latest
     timeout-minutes: 30
+    permissions:
+      contents: read
+      actions: write
     outputs:
       publish_release: ${{ steps.request.outputs.publish_release }}
     steps:
+      - name: Cancel superseded blocked validation run
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh api --method POST repos/jakeisboss/bot-toucher-2/actions/runs/42918425239/cancel --silent
+          if ($LASTEXITCODE -ne 0) { Write-Warning 'Superseded run may already have completed' }
+          exit 0
       - uses: actions/checkout@v4
       - name: Read explicit validation request
         id: request

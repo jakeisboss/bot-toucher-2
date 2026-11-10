@@ -10,6 +10,10 @@ trap {
     throw $_
 }
 Set-Location (Join-Path $PSScriptRoot '..')
+function Milestone([string]$Text) {
+    Write-Host $Text
+    if ($env:GITHUB_ACTIONS -eq 'true') { Write-Output "::notice title=BT2 transaction milestone::$Text" }
+}
 $testRoot = Join-Path ([System.IO.Path]::GetTempPath()) ('BT2-update-proof-' + [Guid]::NewGuid().ToString('N'))
 $installRoot = Join-Path $testRoot 'installed'
 New-Item -ItemType Directory $testRoot | Out-Null
@@ -19,10 +23,12 @@ function Run-DotNet {
     $result = $LASTEXITCODE
     $lines | ForEach-Object { Write-Host $_ }
     if ($result -ne 0) { throw ("dotnet failed: $args`n" + (($lines | Select-Object -Last 60) -join "`n")) }
+    Milestone "dotnet command completed: $args"
 }
 function Run-Updater {
     & $script:seedUpdater @args --root $script:installRoot
     if ($LASTEXITCODE -ne 0) { throw "Updater failed: $args" }
+    Milestone "Updater command completed: $args"
 }
 function Read-SharedJson {
     param([string]$Path)
@@ -56,11 +62,13 @@ function Run-ManagedUpdater {
     }
     $start.ArgumentList.Add('--root')
     $start.ArgumentList.Add([System.IO.Path]::GetRelativePath($start.WorkingDirectory, $script:installRoot))
+    Milestone "Starting managed updater command: $args"
     $caller = [System.Diagnostics.Process]::Start($start)
     try {
         $stdout = $caller.StandardOutput.ReadToEndAsync()
         $stderr = $caller.StandardError.ReadToEndAsync()
         if (-not $caller.WaitForExit(30000)) { $caller.Kill(); throw 'Managed caller did not exit after handoff' }
+        Milestone "Managed caller exited; awaiting detached command output closure"
         if (-not $stdout.Wait(600000) -or -not $stderr.Wait(600000)) { throw 'Managed command output did not close within ten minutes' }
         $acceptedText = $stdout.GetAwaiter().GetResult()
         $errorText = $stderr.GetAwaiter().GetResult()
@@ -80,7 +88,7 @@ function Run-ManagedUpdater {
         Start-Sleep -Milliseconds 100
     } while ([DateTime]::UtcNow -lt $deadline)
     if ($result.State -ne 'Completed' -or $result.ExitCode -ne 0) { throw "Managed command did not complete successfully: $($result | ConvertTo-Json -Compress). Result: $($accepted.ResultPath)" }
-    Write-Host "Managed command completed: $($accepted.ResultPath)"
+    Milestone "Managed command completed: $($accepted.ResultPath)"
 }
 function Get-UpdateStatus {
     $text = & $script:seedUpdater status --root $script:installRoot
