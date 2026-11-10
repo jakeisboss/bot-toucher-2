@@ -23,14 +23,14 @@ public partial class MainWindow : Window
         initialState.Validate();
         State = initialState;
         InitializeComponent();
-        _packets = new PacketCenterView();
+        root ??= System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "BotToucher2");
+        activity ??= new ActivityLog(root);
+        _packets = new PacketCenterView(activity);
         _packets.SectionSelected += section =>
         {
             if (section == PacketSection.UpdateCenter) OpenUpdates();
             else ApplyState(State with { PacketSection = section });
         };
-        root ??= System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "BotToucher2");
-        activity ??= new ActivityLog(root);
         _settings = new SettingsView((left, right) => ApplyState(State with { LeftVisible = left, RightVisible = right }), updates);
         _surfaces = new()
         {

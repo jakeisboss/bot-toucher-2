@@ -24,12 +24,12 @@ internal static class Program
         var log = new ActivityLog(root);
         var messages = new List<string>();
         var engine = new UpdateEngine(root, message => { messages.Add(message); Console.Error.WriteLine(message); });
+        using var launcher = new WindowsApplicationLauncher(root);
         try
         {
             var command = args[0];
             if (command == "package") { Package(options); return 0; }
             if (command is "apply" or "rollback" or "recover") await WaitForParent(options);
-            var launcher = new WindowsApplicationLauncher(root);
             switch (command)
             {
                 case "status": Print(await engine.StatusAsync()); break;
@@ -71,6 +71,24 @@ internal static class Program
         {
             Console.Error.WriteLine(ex.Message);
             try { foreach (var message in messages) await log.RecordAsync("UPDATE", message); await log.RecordAsync("UPDATE_ERROR", ex.ToString(), "Error"); } catch (Exception) { /* The original error remains visible on stderr. */ }
+            if (options.ContainsKey("wait-pid"))
+            {
+                var relaunched = launcher.HasActiveApplication;
+                try
+                {
+                    var status = await engine.StatusAsync();
+                    if (!relaunched && !status.Pending && status.AppDirectory is not null)
+                    {
+                        await engine.VerifyCurrentAsync();
+                        relaunched = await launcher.LaunchAsync(status.AppDirectory, Guid.NewGuid().ToString("N"), CancellationToken.None);
+                    }
+                }
+                catch (Exception recoveryError)
+                {
+                    try { await log.RecordAsync("RELAUNCH_ERROR", recoveryError.Message, "Error"); } catch (Exception) { }
+                }
+                WindowsErrorReport.Show("BT2 update failed: " + ex.Message + (relaunched ? "\nThe previous application was relaunched." : "\nOpen the external updater and run status/recover. No unverified installation was launched.") + "\nDetails: " + log.Path);
+            }
             return 1;
         }
     }
@@ -112,7 +130,9 @@ internal static class Program
             File.Copy(Path.Combine(bundle, op.Path.Replace('/', Path.DirectorySeparatorChar)), Path.Combine(assets, op.AssetName!));
         var manifestBytes = JsonSerializer.SerializeToUtf8Bytes(manifest, Json);
         File.WriteAllBytes(Path.Combine(output, "transition.json"), manifestBytes);
-        var descriptor = new ReleaseTransition(manifest.SourceId, manifest.SourceVersion, "transition.json",
+        var manifestAsset = "transition-" + (manifest.SourceId ?? "initial") + ".json";
+        File.WriteAllBytes(Path.Combine(output, manifestAsset), manifestBytes);
+        var descriptor = new ReleaseTransition(manifest.SourceId, manifest.SourceVersion, manifestAsset,
             Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(manifestBytes)).ToLowerInvariant(), manifestBytes.Length, manifest.RequiredBytes);
         File.WriteAllText(Path.Combine(output, "bt2-release.json"), JsonSerializer.Serialize(new ReleaseMetadata(1, "bot-toucher-2", manifest.Version,
             options.GetValueOrDefault("notes") ?? "BT2 release " + manifest.Version, new[] { descriptor }), Json));

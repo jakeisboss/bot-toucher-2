@@ -1,12 +1,17 @@
 using System.Windows;
 using System.Windows.Controls;
 using BotToucher2.Core.Shell;
+using BotToucher2.Core.Activity;
 namespace BotToucher2.App.Views;
 public partial class PacketCenterView : UserControl
 {
     private bool _updating;
     public event Action<PacketSection>? SectionSelected;
-    public PacketCenterView() => InitializeComponent();
+    public PacketCenterView(ActivityLog? activity = null)
+    {
+        InitializeComponent();
+        ActivityHost.Content = activity is null ? new TextBlock { Text = "Activity is unavailable in this isolated fixture." } : new ActivityFeed(activity);
+    }
     public void ShowSection(PacketSection section)
     {
         _updating = true;

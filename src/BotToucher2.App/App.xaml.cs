@@ -29,6 +29,9 @@ public partial class App : Application
             var root = Path.GetFullPath(Option(e.Args, "--bt2-root") ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "BotToucher2"));
             Directory.CreateDirectory(Path.Combine(root, "control"));
             _instance = new FileStream(Path.Combine(root, "control", "app.instance.lock"), FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.Read);
+            _instance.SetLength(0);
+            _instance.Write(System.Text.Encoding.UTF8.GetBytes(Environment.ProcessId.ToString(System.Globalization.CultureInfo.InvariantCulture)));
+            _instance.Flush(flushToDisk: true);
             _activity = new ActivityLog(root);
             await Record("STARTUP", "Bot Toucher 2 0.1.0 started. No update checks, installs or tests run at startup.");
             var state = Path.Combine(root, "state"); Directory.CreateDirectory(state);
@@ -42,6 +45,11 @@ public partial class App : Application
             }
             _preferences = new ShellPreferences(preferencesPath);
             var loaded = await _preferences.LoadAsync();
+            if (readyToken is not null && !File.Exists(preferencesPath) && File.Exists(legacy))
+            {
+                // Inspect/migrate legacy bytes in memory before readiness, without writing state.
+                loaded = await new ShellPreferences(legacy).LoadAsync();
+            }
             if (loaded.Notice is not null) await Record("PREFERENCES_NOTICE", loaded.Notice, "Warning");
             _updates = new UpdateController(root, _activity);
             var window = new MainWindow(loaded.State, loaded.Notice, root, _activity, _updates);
@@ -74,7 +82,9 @@ public partial class App : Application
             {
                 if (readyToken.Length != 32 || readyToken.Any(c => !Uri.IsHexDigit(c) || char.IsUpper(c))) throw new InvalidDataException("Invalid candidate readiness token.");
                 _candidateWaiting = true; window.IsEnabled = false;
-                window.Loaded += async (_, _) => await AcknowledgeReady(root, readyToken, window);
+                var helperPidText = Option(e.Args, "--bt2-helper-pid");
+                if (!int.TryParse(helperPidText, out var helperPid) || helperPid <= 0) throw new InvalidDataException("Missing candidate helper identity.");
+                window.Loaded += async (_, _) => await AcknowledgeReady(root, readyToken, helperPid, window);
             }
             window.Show();
         }
@@ -87,7 +97,7 @@ public partial class App : Application
             _updates?.Dispose(); _instance?.Dispose(); _stop.Dispose(); Shutdown(1);
         }
     }
-    private async Task AcknowledgeReady(string root, string token, MainWindow window)
+    private async Task AcknowledgeReady(string root, string token, int helperPid, MainWindow window)
     {
         try
         {
@@ -98,6 +108,8 @@ public partial class App : Application
             }
             // Read-only protocol wait: only the helper may commit or recover a transaction.
             var engine = new UpdateEngine(root);
+            using var helper = FindHelper(helperPid);
+            var limit = DateTime.UtcNow.AddMinutes(2);
             while (!_closing)
             {
                 var status = await Task.Run(() => engine.StatusAsync());
@@ -109,17 +121,26 @@ public partial class App : Application
                     var legacyPath = Path.Combine(root, "layout.json");
                     if (!File.Exists(statePath) && File.Exists(legacyPath))
                     {
-                        File.Copy(legacyPath, statePath, overwrite: false);
-                        _preferences = new ShellPreferences(statePath);
-                        var imported = await _preferences.LoadAsync();
-                        window.RestoreLayout(imported.State);
-                        if (imported.Notice is not null) window.ShowNotice(imported.Notice);
-                        await Record("PREFERENCES_IMPORT", "Imported original 0.0 preferences after candidate commit; original retained.");
+                        try
+                        {
+                            File.Copy(legacyPath, statePath, overwrite: false);
+                            _preferences = new ShellPreferences(statePath);
+                            var imported = await _preferences.LoadAsync();
+                            if (imported.Notice is not null) window.ShowNotice(imported.Notice);
+                            await Record("PREFERENCES_IMPORT", "Persisted previously inspected 0.0 preferences after commit; original retained.");
+                        }
+                        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                        {
+                            _preferences = null; // Preserve original bytes and disable saving for this session.
+                            window.ShowNotice("Preferences could not be imported; original retained and saving disabled: " + ex.Message);
+                            await Record("PREFERENCES_IMPORT_ERROR", ex.Message, "Warning");
+                        }
                     }
                     _candidateWaiting = false; window.IsEnabled = true;
                     await Record("APPLICATION_READY", "Application initialized and the helper confirmed the active installation.");
                     return;
                 }
+                if (helper is null || helper.HasExited || DateTime.UtcNow >= limit) throw new IOException("The updater stopped before the transaction completed. Run explicit external recover.");
                 await Task.Delay(100, _stop.Token);
             }
         }
@@ -152,6 +173,8 @@ public partial class App : Application
     }
     private async Task Record(string code, string message, string severity = "Info")
     { try { if (_activity is not null) await _activity.RecordAsync(code, message, severity); } catch (Exception) { /* Logging failure must not block startup/shutdown. */ } }
+    private static Process? FindHelper(int pid)
+    { try { return Process.GetProcessById(pid); } catch (ArgumentException) { return null; } }
     private static string? Option(string[] args, string key)
     {
         var index = Array.IndexOf(args, key);

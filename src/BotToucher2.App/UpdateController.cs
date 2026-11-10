@@ -12,7 +12,8 @@ public sealed class UpdateController : IDisposable
     private AvailableUpdate? _available;
     private UpdateStatus? _status;
     public Action<string, string, string>? HandoffRequested { get; set; }
-    public bool CanInstall => _available is not null && _status?.Current is not null && !_status.Pending;
+    public bool CanInstall => _available is not null && _status?.Current is not null && !_status.Pending &&
+        _available.Manifest.SourceId == _status.Current.InventoryId && _available.Manifest.SourceVersion == _status.Current.Version;
     public bool CanRollback => _status?.Previous is not null && !_status.Pending;
     public UpdateController(string root, ActivityLog log)
     {
@@ -23,6 +24,7 @@ public sealed class UpdateController : IDisposable
     {
         try
         {
+            if (operation == "check") _available = null;
             _status = await Task.Run(() => _engine.StatusAsync());
             if (operation == "check")
             {
