@@ -10,7 +10,7 @@ BT2 remains a Windows-first .NET 8 WPF application, continuing the accepted 0.0 
 
 The authoritative acceptance list is [DEFINITION-OF-DONE.md](DEFINITION-OF-DONE.md). [BT1-INSPECTION.md](BT1-INSPECTION.md) records inspected source and reuse decisions before implementation. Existing source is changed only for concrete 0.1 requirements.
 
-## Approaches and proposed choice
+## Approved approach
 
 Updater alternatives: (a) journaled in-place file replacement, (b) verified version directories and an atomic active-install record. Both need staging, hashes, receipts and recovery. Prefer (b): live binaries remain untouched until the target is complete; one small owned record controls activation. It costs local staging disk space but does not increase download size, and leaves the old installation recoverable after a process interruption. Do not use a second repair/rollback engine.
 
@@ -99,7 +99,7 @@ Recovery compares the journal's transaction ID with the atomic record. If commit
 
 ### Mutable state and candidate readiness
 
-Only `state/` contains managed mutable shell/widget-layout state in 0.1. External widget binaries/data and activity logs are outside that snapshot. After the old app exits and before activating a candidate, snapshot the full bounded managed state directory, including exact bytes and a hashed inventory. Stage preparation does not migrate the live state.
+Only `state/` contains managed mutable shell preferences in 0.1. Activity logs are outside that snapshot. After the old app exits and before activating a candidate, snapshot the full bounded managed state directory, including exact bytes and a hashed inventory. Stage preparation does not migrate the live state.
 
 The candidate loads/migrates preferences in memory for readiness, runs no tests or update operations, and does not persist state or accept user edits until the updater records commit. If candidate readiness fails, restore the verified pre-transition state snapshot using the same journaled authority; retain any unexpected differing state bytes for recovery rather than discard them.
 
