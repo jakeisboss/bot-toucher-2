@@ -14,6 +14,7 @@ public static class UpdatePlanner
         if (!Version.TryParse(version, out _) || version.Length > 64) throw new InvalidDataException("Invalid version.");
         if ((source is null) != (sourceVersion is null) || (sourceVersion is not null && !Version.TryParse(sourceVersion, out _))) throw new InvalidDataException("Invalid source version.");
         var s = Validate(source ?? Array.Empty<InventoryFile>()); var t = Validate(target);
+        if (!t.Any(x => x.Path == "app/BotToucher2.exe" && x.Size > 0) || !t.Any(x => x.Path == "engine/BotToucher2.Updater.exe" && x.Size > 0)) throw new InvalidDataException("Target must contain the application and updater entry points.");
         var old = s.ToDictionary(x => x.Path, StringComparer.OrdinalIgnoreCase);
         var next = t.ToDictionary(x => x.Path, StringComparer.OrdinalIgnoreCase);
         var operations = new List<UpdateOperation>();

@@ -43,8 +43,8 @@ public sealed class UpdateEngine
     private static void CheckToken(string value) { if (value.Length != 32 || value.Any(c => !Uri.IsHexDigit(c) || char.IsUpper(c))) throw new InvalidDataException("Invalid owned transaction identifier."); }
     private static void CheckStageId(string stageId) { if (stageId.Length != 97 || stageId[32] != '-' || stageId.Where((_, i) => i != 32).Any(c => !Uri.IsHexDigit(c) || char.IsUpper(c))) throw new InvalidDataException("Invalid stage identifier."); }
     private static string Digest<T>(T value) => Convert.ToHexString(SHA256.HashData(JsonSerializer.SerializeToUtf8Bytes(value, Json))).ToLowerInvariant();
-    private static async Task<T?> Read<T>(string path, CancellationToken ct) { Guard(path); if (!File.Exists(path)) return default; var info = new FileInfo(path); if (info.Length > 4 * 1024 * 1024) throw new InvalidDataException("Metadata exceeds limit."); await using var f = File.OpenRead(path); return await JsonSerializer.DeserializeAsync<T>(f, Json, ct); }
-    private static async Task Write<T>(string path, T value, CancellationToken ct) { Guard(path); Directory.CreateDirectory(Path.GetDirectoryName(path)!); Guard(path); var temp = path + "." + Token() + ".tmp"; try { await using (var f = new FileStream(temp, FileMode.CreateNew, FileAccess.Write, FileShare.None, 4096, FileOptions.WriteThrough)) { await JsonSerializer.SerializeAsync(f, value, Json, ct); await f.FlushAsync(ct); f.Flush(true); } File.Move(temp, path, true); } finally { if (File.Exists(temp)) File.Delete(temp); } }
+    private static async Task<T?> Read<T>(string path, CancellationToken ct) { Guard(path); if (!File.Exists(path)) return default; var info = new FileInfo(path); if (info.Length > 4 * 1024 * 1024) throw new InvalidDataException("Metadata exceeds limit."); await using var f = File.OpenRead(path); return await JsonSerializer.DeserializeAsync<T>(f, Json, ct) ?? throw new InvalidDataException("Metadata contains null instead of a record."); }
+    private static async Task Write<T>(string path, T value, CancellationToken ct) { Guard(path); Directory.CreateDirectory(Path.GetDirectoryName(path)!); Guard(path); var temp = path + "." + Token() + ".tmp"; try { await using (var f = new FileStream(temp, FileMode.CreateNew, FileAccess.Write, FileShare.None, 4096, FileOptions.WriteThrough)) { await JsonSerializer.SerializeAsync(f, value, Json, ct); if (f.Length > 4 * 1024 * 1024) throw new InvalidDataException("Metadata exceeds limit."); await f.FlushAsync(ct); f.Flush(true); } File.Move(temp, path, true); } finally { if (File.Exists(temp)) File.Delete(temp); } }
     private FileStream Lease() { var path = Guard(Path.Combine(root, "updates", "lease.lock")); Directory.CreateDirectory(Path.GetDirectoryName(path)!); return new FileStream(path, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None); }
     private FileStream AppLease() { var path = Guard(Path.Combine(root, "control", "app.instance.lock")); Directory.CreateDirectory(Path.GetDirectoryName(path)!); return new FileStream(path, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None); }
     private async Task<InstallRecord?> LoadCurrent(CancellationToken ct)
@@ -108,6 +108,12 @@ public sealed class UpdateEngine
         {
             var receiptPath = Guard(Path.Combine(root, "updates", "transactions", oldReceiptId + ".receipt.json"));
             if (File.Exists(receiptPath)) { await ValidateReferencedReceipt(oldReceiptId, before!.Previous, ct); File.Delete(receiptPath); }
+        }
+        var supersededCurrentId = before?.TransactionId;
+        if (supersededCurrentId is not null && supersededCurrentId != after.TransactionId && supersededCurrentId != after.PreviousReceiptId && supersededCurrentId != after.AnchorReceiptId)
+        {
+            var path = Guard(Path.Combine(root, "updates", "transactions", supersededCurrentId + ".receipt.json"));
+            if (File.Exists(path)) { await ValidateReferencedReceipt(supersededCurrentId, before!.Current, ct); File.Delete(path); }
         }
         var oldSnapshot = before?.PreviousStateSnapshot;
         if (oldSnapshot is not null && oldSnapshot != after.PreviousStateSnapshot && oldSnapshot != after.DisplacedStateSnapshot && oldSnapshot != before?.DisplacedStateSnapshot)
@@ -176,14 +182,14 @@ public sealed class UpdateEngine
         await Write(ResolvedPath(id), new ResolvedSnapshot(id, snapshot.Digest), cancellationToken);
         events?.Invoke("Displaced state acknowledged for later rotation.");
     }
-    private static void DeleteTree(string path)
+    private static void DeleteTree(string path, Action? afterEntry = null)
     {
         Guard(path);
         foreach (var entry in Directory.EnumerateFileSystemEntries(path))
         {
             var attributes = File.GetAttributes(entry);
             if ((attributes & FileAttributes.ReparsePoint) != 0) throw new InvalidDataException("Reparse point in cleanup target.");
-            if ((attributes & FileAttributes.Directory) != 0) DeleteTree(entry); else File.Delete(entry);
+            if ((attributes & FileAttributes.Directory) != 0) DeleteTree(entry, afterEntry); else File.Delete(entry); afterEntry?.Invoke();
         }
         Directory.Delete(path);
     }
@@ -253,15 +259,38 @@ public sealed class UpdateEngine
         var source = Path.Combine(Bundle(receipt.Identity.InventoryId), "engine");
         static InventoryFile[] EngineFiles(string path) => UpdatePlanner.InventoryState(path).Select(x => x with { Path = "engine/" + x.Path[4..] }).ToArray();
         if (!EngineFiles(source).SequenceEqual(expected)) throw new InvalidDataException("Selected updater engine is damaged.");
-        var workerParent = Guard(Path.Combine(root, "control", "workers", UpdatePlanner.Identity(expected)));
-        var worker = Guard(Path.Combine(workerParent, "engine"));
+        var workersRoot = Guard(Path.Combine(root, "control", "workers")); Directory.CreateDirectory(workersRoot);
+        var engineId = UpdatePlanner.Identity(expected);
+        var workerParent = Guard(Path.Combine(workersRoot, engineId)); var worker = Guard(Path.Combine(workerParent, "engine"));
+        var pendingPrefix = ".pending-" + engineId + "-";
+        foreach (var pending in Directory.EnumerateDirectories(workersRoot, pendingPrefix + "*", SearchOption.TopDirectoryOnly))
+        {
+            var name = Path.GetFileName(pending); var suffix = name[pendingPrefix.Length..];
+            if (suffix.Length != 32 || suffix.Any(c => !Uri.IsHexDigit(c) || char.IsUpper(c))) continue;
+            QuarantineWorker(workersRoot, pending);
+        }
         if (Directory.Exists(workerParent))
         {
-            if (!Directory.Exists(worker) || Directory.EnumerateFileSystemEntries(workerParent).Any(path => Path.GetFileName(path) != "engine")) throw new InvalidDataException("Existing worker contains unexpected evidence.");
+            var valid = false;
+            try { valid = Directory.Exists(worker) && Directory.EnumerateFileSystemEntries(workerParent).All(path => Path.GetFileName(path) == "engine") && EngineFiles(worker).SequenceEqual(expected); }
+            catch (InvalidDataException) { }
+            if (!valid) QuarantineWorker(workersRoot, workerParent);
         }
-        else CopyTree(source, worker);
+        if (!Directory.Exists(workerParent))
+        {
+            var pending = Guard(Path.Combine(workersRoot, pendingPrefix + Token()));
+            var temporaryEngine = Path.Combine(pending, "engine");
+            CopyTree(source, temporaryEngine, () => checkpoint?.Invoke("worker-copy-file"));
+            if (!EngineFiles(temporaryEngine).SequenceEqual(expected) || !EngineFiles(source).SequenceEqual(expected)) throw new InvalidDataException("Worker copy failed verification.");
+            Directory.Move(pending, workerParent);
+        }
         if (!EngineFiles(worker).SequenceEqual(expected) || !EngineFiles(source).SequenceEqual(expected)) throw new InvalidDataException("Worker copy failed verification.");
         return worker;
+    }
+    private static void QuarantineWorker(string workersRoot, string source)
+    {
+        Guard(source); var quarantine = Guard(Path.Combine(workersRoot, "quarantine", Token()));
+        Directory.CreateDirectory(Path.GetDirectoryName(quarantine)!); Directory.Move(source, quarantine);
     }
     public Task<string> StageAsync(TransitionManifest manifest, IAssetSource assets, CancellationToken cancellationToken = default) => StageCore(manifest, assets, false, cancellationToken);
     public Task<string> StageRecoveryAsync(TransitionManifest manifest, IAssetSource assets, CancellationToken cancellationToken = default) => StageCore(manifest, assets, true, cancellationToken);
@@ -337,7 +366,18 @@ public sealed class UpdateEngine
         var bundle = Bundle(candidate.Identity.InventoryId); Directory.CreateDirectory(Path.GetDirectoryName(bundle)!);
         if (sameRecovery && journal.HadCurrentBundle)
         {
-            var old = Quarantine(journal, "old"); Directory.CreateDirectory(Path.GetDirectoryName(old)!); Directory.Move(bundle, old); checkpoint?.Invoke("quarantined");
+            var healthy = true; try { Verify(bundle, before!.Current); } catch (InvalidDataException) { healthy = false; }
+            if (!healthy) { var old = Quarantine(journal, "old"); Directory.CreateDirectory(Path.GetDirectoryName(old)!); Directory.Move(bundle, old); checkpoint?.Invoke("quarantined"); }
+        }
+        if (stage.Recovery && !sameRecovery && before is not null)
+        {
+            var prior = Bundle(before.Current.Identity.InventoryId);
+            if (Directory.Exists(prior))
+            {
+                var retained = before.Current.Identity.InventoryId == before.Previous?.Identity.InventoryId || before.Current.Identity.InventoryId == before.Anchor?.Identity.InventoryId;
+                if (retained) Verify(prior, before.Current);
+                else { var evidence = Quarantine(journal, "old-current"); Directory.CreateDirectory(Path.GetDirectoryName(evidence)!); Directory.Move(prior, evidence); checkpoint?.Invoke("quarantined-current"); }
+            }
         }
         if (Directory.Exists(bundle)) Verify(bundle, candidate); else Directory.Move(Path.Combine(StageRoot(stageId), "bundle"), bundle);
         Verify(bundle, candidate); checkpoint?.Invoke("published"); appLease.Dispose();
@@ -370,7 +410,7 @@ public sealed class UpdateEngine
         File.Delete(metadata); Directory.Delete(dir);
     }
     private string SnapshotRoot(string id) { CheckToken(id); return Guard(Path.Combine(root, "updates", "snapshots", id)); }
-    private static void CopyTree(string source, string destination)
+    private static void CopyTree(string source, string destination, Action? afterChunk = null)
     {
         Directory.CreateDirectory(destination); if (!Directory.Exists(source)) return;
         var stack = new Stack<(string Source, string Destination)>(); stack.Push((source, destination)); long bytes = 0; var count = 0;
@@ -383,7 +423,7 @@ public sealed class UpdateEngine
                 var attr = File.GetAttributes(entry); if ((attr & FileAttributes.ReparsePoint) != 0) throw new InvalidDataException("State contains a reparse point.");
                 var target = Path.Combine(to, Path.GetFileName(entry));
                 if ((attr & FileAttributes.Directory) != 0) { Directory.CreateDirectory(target); stack.Push((entry, target)); }
-                else { if (++count > 8192 || (bytes += new FileInfo(entry).Length) > 2L * 1024 * 1024 * 1024) throw new InvalidDataException("State exceeds snapshot limit."); File.Copy(entry, target); }
+                else { if (++count > 8192 || (bytes += new FileInfo(entry).Length) > 2L * 1024 * 1024 * 1024) throw new InvalidDataException("State exceeds snapshot limit."); if (afterChunk is null) File.Copy(entry, target); else { using var input = File.OpenRead(entry); using var output = new FileStream(target, FileMode.CreateNew, FileAccess.Write, FileShare.None); var buffer = new byte[65536]; int read; while ((read = input.Read(buffer)) > 0) { output.Write(buffer, 0, read); afterChunk(); } } }
             }
         }
     }
@@ -393,22 +433,66 @@ public sealed class UpdateEngine
         CopyTree(Guard(Path.Combine(root, "state")), Path.Combine(dir, "app"));
         var inventory = UpdatePlanner.Inventory(dir); await Write(Path.Combine(dir, "snapshot.json"), new Snapshot(inventory, Digest(inventory)), ct); return id;
     }
+    private string RestoreWorkspace(string transaction)
+    {
+        CheckToken(transaction); return Guard(Path.Combine(root, "updates", "restores", transaction));
+    }
+    private void CleanupSupersededState(string transaction, string targetId, InventoryFile[] sourceInventory)
+    {
+        CheckToken(targetId); var displaced = Guard(Path.Combine(RestoreWorkspace(transaction), targetId + "-superseded"));
+        if (!Directory.Exists(displaced)) return;
+        var expected = sourceInventory.ToDictionary(x => x.Path, StringComparer.Ordinal);
+        foreach (var file in UpdatePlanner.InventoryState(displaced)) if (!expected.TryGetValue(file.Path, out var declared) || file != declared) throw new InvalidDataException("Superseded state differs from its snapshot.");
+        DeleteTree(displaced, () => checkpoint?.Invoke("state-cleanup-entry"));
+    }
+    private void CleanupRestoreAttempts(string transaction, string snapshotId, InventoryFile[] inventory)
+    {
+        CheckToken(snapshotId); var workspace = RestoreWorkspace(transaction); if (!Directory.Exists(workspace)) return;
+        var prefix = snapshotId + "-attempt-"; var expected = inventory.ToDictionary(x => x.Path, StringComparer.Ordinal);
+        foreach (var attempt in Directory.EnumerateDirectories(workspace, prefix + "*", SearchOption.TopDirectoryOnly))
+        {
+            var name = Path.GetFileName(attempt); var suffix = name[prefix.Length..];
+            if (suffix.Length != 32 || suffix.Any(c => !Uri.IsHexDigit(c) || char.IsUpper(c))) continue;
+            foreach (var file in UpdatePlanner.InventoryState(attempt))
+            {
+                if (!expected.TryGetValue(file.Path, out var declared) || file.Size > declared.Size) throw new InvalidDataException("Unexpected restore attempt evidence.");
+                var relative = file.Path[4..].Replace('/', Path.DirectorySeparatorChar);
+                using var partial = File.OpenRead(Path.Combine(attempt, relative)); using var complete = File.OpenRead(Path.Combine(SnapshotRoot(snapshotId), "app", relative));
+                var left = new byte[65536]; var right = new byte[65536]; int read;
+                while ((read = partial.Read(left, 0, left.Length)) > 0)
+                {
+                    complete.ReadExactly(right.AsSpan(0, read));
+                    if (!left.AsSpan(0, read).SequenceEqual(right.AsSpan(0, read))) throw new InvalidDataException("Restore attempt bytes differ from snapshot.");
+                }
+            }
+            DeleteTree(attempt, () => checkpoint?.Invoke("state-attempt-cleanup-entry"));
+        }
+    }
     private async Task RestoreState(string id, string sourceSnapshot, string transaction, CancellationToken ct)
     {
-        var dir = SnapshotRoot(id); var snapshot = await Read<Snapshot>(Path.Combine(dir, "snapshot.json"), ct) ?? throw new InvalidDataException("Snapshot missing.");
-        if (snapshot.Digest != Digest(snapshot.Inventory)) throw new InvalidDataException("Snapshot receipt mismatch.");
-        // Inventory only the state subtree; metadata lives alongside it.
-        var actual = UpdatePlanner.InventoryState(Path.Combine(dir, "app"));
-        if (!actual.SequenceEqual(snapshot.Inventory)) throw new InvalidDataException("Snapshot contents mismatch.");
-        var sourceDir = SnapshotRoot(sourceSnapshot); var sourceReceipt = await Read<Snapshot>(Path.Combine(sourceDir, "snapshot.json"), ct) ?? throw new InvalidDataException("Source snapshot missing.");
-        if (sourceReceipt.Digest != Digest(sourceReceipt.Inventory) || !UpdatePlanner.InventoryState(Path.Combine(sourceDir, "app")).SequenceEqual(sourceReceipt.Inventory)) throw new InvalidDataException("Source snapshot mismatch.");
+        var desired = await ReadSnapshot(id, ct); var source = await ReadSnapshot(sourceSnapshot, ct);
+        var workspace = RestoreWorkspace(transaction); Directory.CreateDirectory(workspace);
+        var prepared = Guard(Path.Combine(workspace, id + "-attempt-" + Token()));
+        CopyTree(Path.Combine(SnapshotRoot(id), "app"), prepared, () => { ct.ThrowIfCancellationRequested(); checkpoint?.Invoke("state-copy-file"); });
+        if (!UpdatePlanner.InventoryState(prepared).SequenceEqual(desired.Inventory)) throw new InvalidDataException("Prepared state differs from its snapshot.");
         var state = Guard(Path.Combine(root, "state"));
+        var superseded = Guard(Path.Combine(workspace, id + "-superseded"));
+        if (Directory.Exists(state) && UpdatePlanner.InventoryState(state).SequenceEqual(desired.Inventory))
+        {
+            DeleteTree(prepared); CleanupSupersededState(transaction, id, source.Inventory); CleanupRestoreAttempts(transaction, id, desired.Inventory); return;
+        }
         if (Directory.Exists(state))
         {
-            if (UpdatePlanner.InventoryState(state).SequenceEqual(sourceReceipt.Inventory)) DeleteTree(state);
-            else { var evidence = Guard(Path.Combine(root, "updates", "recovery", transaction)); Directory.CreateDirectory(Path.GetDirectoryName(evidence)!); if (Directory.Exists(evidence)) throw new InvalidOperationException("Unresolved state evidence blocks recovery."); Directory.Move(state, evidence); events?.Invoke("Unexpected state retained at " + evidence); }
+            if (UpdatePlanner.InventoryState(state).SequenceEqual(source.Inventory) && !Directory.Exists(superseded)) Directory.Move(state, superseded);
+            else
+            {
+                var evidence = Guard(Path.Combine(root, "updates", "recovery", transaction, id + "-" + Token()));
+                Directory.CreateDirectory(Path.GetDirectoryName(evidence)!); Directory.Move(state, evidence); events?.Invoke("Unexpected state retained at " + evidence);
+            }
+            checkpoint?.Invoke("state-displaced");
         }
-        CopyTree(Path.Combine(dir, "app"), state);
+        Directory.Move(prepared, state); checkpoint?.Invoke("state-published");
+        CleanupSupersededState(transaction, id, source.Inventory); CleanupRestoreAttempts(transaction, id, desired.Inventory);
     }
     private string Quarantine(Journal journal, string name)
     {
@@ -417,7 +501,13 @@ public sealed class UpdateEngine
     }
     private void RestoreQuarantinedBundle(Journal journal)
     {
-        if (!journal.Recovery || journal.Before is null || journal.Before.Current.Identity.InventoryId != journal.Candidate.Identity.InventoryId) return;
+        if (!journal.Recovery || journal.Before is null) return;
+        if (journal.Before.Current.Identity.InventoryId != journal.Candidate.Identity.InventoryId)
+        {
+            var evidence = Quarantine(journal, "old-current"); var original = Bundle(journal.Before.Current.Identity.InventoryId);
+            if (Directory.Exists(evidence)) { if (Directory.Exists(original)) throw new InvalidDataException("Conflicting recovery evidence."); Directory.Move(evidence, original); }
+            return;
+        }
         var old = Quarantine(journal, "old"); var bundle = Bundle(journal.Candidate.Identity.InventoryId);
         if (Directory.Exists(old) || !journal.HadCurrentBundle)
         {
@@ -470,6 +560,7 @@ public sealed class UpdateEngine
         RestoreQuarantinedBundle(journal);
         CleanupUncommittedCandidate(journal);
         await RestoreState(journal.StateSnapshot, journal.StateSnapshot, journal.TransactionId, ct);
+        if (journal.Before?.PreviousStateSnapshot is not null) { var source = await ReadSnapshot(journal.StateSnapshot, ct); CleanupSupersededState(journal.TransactionId, journal.Before.PreviousStateSnapshot, source.Inventory); var target = await ReadSnapshot(journal.Before.PreviousStateSnapshot, ct); CleanupRestoreAttempts(journal.TransactionId, journal.Before.PreviousStateSnapshot, target.Inventory); }
         await RecordHistory(journal, "failed", ct);
         if (!journal.Recovery && journal.Before is not null) { Verify(Bundle(journal.Before.Current.Identity.InventoryId), journal.Before.Current); if (!await launcher.LaunchAsync(Path.Combine(Bundle(journal.Before.Current.Identity.InventoryId), "app"), Token(), ct)) throw new InvalidOperationException("Previous application did not become ready; recovery remains pending."); }
         await CleanupStage(journal, ct); await CleanupUncommittedReceipt(journal, ct); File.Delete(JournalPath); await CleanupTemporarySnapshot(journal, journal.Before);
@@ -499,7 +590,19 @@ public sealed class UpdateEngine
     {
         using var lease = Lease(); using var appLease = AppLease(); var journal = await LoadJournal(cancellationToken); if (journal is null) return;
         var current = await LoadCurrent(cancellationToken);
-        if (current?.TransactionId == journal.TransactionId) { if (Digest(current.Current) != Digest(journal.Candidate)) throw new InvalidDataException("Committed candidate differs from journal."); Verify(Bundle(current.Current.Identity.InventoryId), current.Current); await RecordHistory(journal, "committed", cancellationToken); await Prune(journal.Before, current, cancellationToken); await CleanupStage(journal, cancellationToken); File.Delete(JournalPath); await CleanupTemporarySnapshot(journal, current); return; }
+        if (current?.TransactionId == journal.TransactionId)
+        {
+            if (Digest(current.Current) != Digest(journal.Candidate)) throw new InvalidDataException("Committed candidate differs from journal.");
+            Verify(Bundle(current.Current.Identity.InventoryId), current.Current); appLease.Dispose();
+            if (!await launcher.LaunchAsync(Path.Combine(Bundle(current.Current.Identity.InventoryId), "app"), Token(), cancellationToken)) throw new InvalidOperationException("Committed application did not become ready; recovery remains pending.");
+            try
+            {
+                await RecordHistory(journal, "committed", cancellationToken); await Prune(journal.Before, current, cancellationToken); await CleanupStage(journal, cancellationToken);
+                if (!launcher.IsRunning) throw new InvalidOperationException("Committed application exited during recovery.");
+                File.Delete(JournalPath); await CleanupTemporarySnapshot(journal, current); return;
+            }
+            catch { await launcher.StopAsync(CancellationToken.None); throw; }
+        }
         if (Digest(current) != Digest(journal.Before)) throw new InvalidDataException("Recovery state mismatch; evidence retained.");
         appLease.Dispose(); await Abort(journal, launcher, cancellationToken);
     }
