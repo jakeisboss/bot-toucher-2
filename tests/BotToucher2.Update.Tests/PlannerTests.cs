@@ -26,3 +26,24 @@ public class PlannerTests
         Assert.Throws<InvalidDataException>(() => UpdatePlanner.CreateManifest("0.1", null, new[] { new InventoryFile(path, 1, new string('a', 64)) }));
     }
 }
+
+public class InventoryAliasTests
+{
+    [Fact]
+    public void RejectsFileDirectoryAliasesIgnoringCase()
+    {
+        var files = new[] { new InventoryFile("app/Config", 1, new string('a', 64)), new InventoryFile("app/config/child", 1, new string('b', 64)) };
+        Assert.Throws<InvalidDataException>(() => UpdatePlanner.CreateManifest("0.1", null, files));
+    }
+}
+
+public class InventoryBoundsTests
+{
+    [Fact]
+    public void RejectsOversizedFilesBeforeHashing()
+    {
+        var root = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N")); Directory.CreateDirectory(Path.Combine(root, "app"));
+        using var file = new FileStream(Path.Combine(root, "app", "huge"), FileMode.CreateNew, FileAccess.ReadWrite, FileShare.None); file.SetLength(512L * 1024 * 1024 + 1);
+        Assert.Throws<InvalidDataException>(() => UpdatePlanner.Inventory(root));
+    }
+}

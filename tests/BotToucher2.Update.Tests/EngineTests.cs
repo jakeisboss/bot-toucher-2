@@ -18,6 +18,8 @@ public class EngineTests
         var stage = await engine.StageAsync(manifest, new Assets(input, manifest));
         Assert.Null((await engine.StatusAsync()).Current);
         await engine.ApplyAsync(stage, new Launcher(true));
+        Assert.False(Directory.Exists(Path.Combine(root, "install-root", "updates", "staging", stage)));
+        Assert.Empty(Directory.EnumerateDirectories(Path.Combine(root, "install-root", "updates", "snapshots")));
         var status = await engine.StatusAsync();
         Assert.Equal(manifest.TargetId, status.Current!.InventoryId);
         Assert.Equal("application", await File.ReadAllTextAsync(Path.Combine(status.AppDirectory!, "app.exe")));
@@ -67,6 +69,12 @@ public class EngineTests
         await engine.RollbackAsync(new Launcher(true));
         var status = await engine.StatusAsync(); Assert.Equal(first.TargetId, status.Current!.InventoryId); Assert.Equal(second.TargetId, status.Previous!.InventoryId);
         Assert.Equal("old state", await File.ReadAllTextAsync(Path.Combine(engineRoot, "state", "prefs")));
+        Assert.NotNull(status.DisplacedStateDirectory);
+        Assert.Equal("new state", await File.ReadAllTextAsync(Path.Combine(status.DisplacedStateDirectory!, "prefs")));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => engine.RollbackAsync(new Launcher(true)));
+        await engine.AcknowledgeDisplacedStateAsync();
+        await engine.RollbackAsync(new Launcher(true));
+        Assert.Equal(second.TargetId, (await engine.StatusAsync()).Current!.InventoryId);
     }
     [Fact]
     public async Task AlteredStageMetadataCannotBeApplied()
@@ -96,7 +104,9 @@ public class EngineTests
         var root = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N")); var input = Path.Combine(root, "input"); Directory.CreateDirectory(Path.Combine(input, "app"));
         await File.WriteAllTextAsync(Path.Combine(input, "app", "a"), "one"); var engine = new UpdateEngine(Path.Combine(root, "root"));
         var first = UpdatePlanner.CreateManifest("0.1", null, UpdatePlanner.Inventory(input)); await engine.ApplyAsync(await engine.StageAsync(first, new Assets(input, first)), new Launcher(true));
+        await engine.VerifyCurrentAsync();
         var status = await engine.StatusAsync(); await File.WriteAllTextAsync(Path.Combine(status.AppDirectory!, "a"), "tampered");
+        await Assert.ThrowsAsync<InvalidDataException>(() => engine.VerifyCurrentAsync());
         var next = UpdatePlanner.CreateManifest("0.2", first.Target, first.Target, "0.1");
         await Assert.ThrowsAsync<InvalidDataException>(() => engine.StageAsync(next, new Assets(input, next)));
     }
@@ -113,15 +123,272 @@ public class EngineTests
         var status = await engine.StatusAsync(); Assert.Equal(full.TargetId, status.Current!.InventoryId); Assert.Null(status.Previous);
         Assert.Equal("tampered", await File.ReadAllTextAsync(Path.Combine(old.AppDirectory!, "a")));
     }
+    [Fact]
+    public async Task WorkerCopyIsVerifiedAndIndependentOfDamagedApp()
+    {
+        var root = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N")); var input = Path.Combine(root, "input");
+        Directory.CreateDirectory(Path.Combine(input, "app")); Directory.CreateDirectory(Path.Combine(input, "engine"));
+        await File.WriteAllTextAsync(Path.Combine(input, "app", "a"), "app"); await File.WriteAllTextAsync(Path.Combine(input, "engine", "worker"), "worker");
+        var engine = new UpdateEngine(Path.Combine(root, "root")); var manifest = UpdatePlanner.CreateManifest("0.1", null, UpdatePlanner.Inventory(input));
+        await engine.ApplyAsync(await engine.StageAsync(manifest, new Assets(input, manifest)), new Launcher(true));
+        var status = await engine.StatusAsync(); await File.WriteAllTextAsync(Path.Combine(status.AppDirectory!, "a"), "damaged");
+        var worker = await engine.PrepareWorkerAsync(); Assert.Equal("worker", await File.ReadAllTextAsync(Path.Combine(worker, "worker")));
+        Assert.Equal(worker, await engine.PrepareWorkerAsync());
+        await File.WriteAllTextAsync(Path.Combine(status.EngineDirectory!, "worker"), "damaged");
+        await Assert.ThrowsAsync<InvalidDataException>(() => engine.PrepareWorkerAsync());
+    }
+    [Fact]
+    public async Task RejectsReparsePointInStagingControlPath()
+    {
+        var root = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N")); var input = Path.Combine(root, "input");
+        Directory.CreateDirectory(Path.Combine(input, "app")); await File.WriteAllTextAsync(Path.Combine(input, "app", "a"), "a");
+        var engineRoot = Path.Combine(root, "root"); Directory.CreateDirectory(Path.Combine(engineRoot, "updates")); var outside = Path.Combine(root, "outside"); Directory.CreateDirectory(outside);
+        Directory.CreateSymbolicLink(Path.Combine(engineRoot, "updates", "staging"), outside);
+        var manifest = UpdatePlanner.CreateManifest("0.1", null, UpdatePlanner.Inventory(input)); var engine = new UpdateEngine(engineRoot);
+        await Assert.ThrowsAsync<InvalidDataException>(() => engine.StageAsync(manifest, new Assets(input, manifest)));
+        Assert.Empty(Directory.EnumerateFileSystemEntries(outside));
+    }
+    [Fact]
+    public async Task TamperedCurrentRecordIsRejectedAgainstDurableReceipt()
+    {
+        var root = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N")); var input = Path.Combine(root, "input"); Directory.CreateDirectory(Path.Combine(input, "app"));
+        await File.WriteAllTextAsync(Path.Combine(input, "app", "a"), "a"); var engineRoot = Path.Combine(root, "root"); var engine = new UpdateEngine(engineRoot);
+        var manifest = UpdatePlanner.CreateManifest("0.1", null, UpdatePlanner.Inventory(input)); await engine.ApplyAsync(await engine.StageAsync(manifest, new Assets(input, manifest)), new Launcher(true));
+        var record = Path.Combine(engineRoot, "install", "current.json"); await File.WriteAllTextAsync(record, (await File.ReadAllTextAsync(record)).Replace("0.1", "0.2"));
+        await Assert.ThrowsAsync<InvalidDataException>(() => engine.StatusAsync());
+    }
+    [Theory]
+    [InlineData("published", false)]
+    [InlineData("committed", true)]
+    public async Task RecoveryDistinguishesInterruptedCommitPoint(string phase, bool committed)
+    {
+        var root = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N")); var input = Path.Combine(root, "input"); Directory.CreateDirectory(Path.Combine(input, "app"));
+        await File.WriteAllTextAsync(Path.Combine(input, "app", "a"), "one"); var engineRoot = Path.Combine(root, "root"); var initial = new UpdateEngine(engineRoot);
+        var first = UpdatePlanner.CreateManifest("0.1", null, UpdatePlanner.Inventory(input)); await initial.ApplyAsync(await initial.StageAsync(first, new Assets(input, first)), new Launcher(true));
+        await File.WriteAllTextAsync(Path.Combine(input, "app", "a"), "two"); var next = UpdatePlanner.CreateManifest("0.2", first.Target, UpdatePlanner.Inventory(input), "0.1");
+        var crashing = new UpdateEngine(engineRoot, checkpoint: p => { if (p == phase) throw new IOException("interrupted"); });
+        var stage = await crashing.StageAsync(next, new Assets(input, next)); await Assert.ThrowsAsync<IOException>(() => crashing.ApplyAsync(stage, new Launcher(true)));
+        Assert.True((await initial.StatusAsync()).Pending); await initial.RecoverAsync(new Launcher(true));
+        var status = await initial.StatusAsync(); Assert.False(status.Pending); Assert.Equal(committed ? next.TargetId : first.TargetId, status.Current!.InventoryId);
+    }
+    [Fact]
+    public async Task RecoveryRejectsAlteredJournalAndKeepsEvidence()
+    {
+        var root = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N")); var input = Path.Combine(root, "input"); Directory.CreateDirectory(Path.Combine(input, "app"));
+        await File.WriteAllTextAsync(Path.Combine(input, "app", "a"), "one"); var engineRoot = Path.Combine(root, "root");
+        var manifest = UpdatePlanner.CreateManifest("0.1", null, UpdatePlanner.Inventory(input)); var engine = new UpdateEngine(engineRoot, checkpoint: p => { if (p == "journaled") throw new IOException("interrupted"); });
+        var stage = await engine.StageAsync(manifest, new Assets(input, manifest)); await Assert.ThrowsAsync<IOException>(() => engine.ApplyAsync(stage, new Launcher(true)));
+        var journal = Path.Combine(engineRoot, "updates", "transactions", "pending.json"); await File.WriteAllTextAsync(journal, (await File.ReadAllTextAsync(journal)).Replace("0.1", "0.2"));
+        await Assert.ThrowsAsync<InvalidDataException>(() => new UpdateEngine(engineRoot).RecoverAsync(new Launcher(true))); Assert.True(File.Exists(journal));
+    }
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task SameInventoryRecoveryPreservesDamagedEvidenceAcrossInterruption(bool interrupt)
+    {
+        var root = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N")); var input = Path.Combine(root, "input"); Directory.CreateDirectory(Path.Combine(input, "app"));
+        await File.WriteAllTextAsync(Path.Combine(input, "app", "a"), "good"); var engineRoot = Path.Combine(root, "root"); var engine = new UpdateEngine(engineRoot);
+        var full = UpdatePlanner.CreateManifest("0.1", null, UpdatePlanner.Inventory(input)); await engine.ApplyAsync(await engine.StageAsync(full, new Assets(input, full)), new Launcher(true));
+        var status = await engine.StatusAsync(); await File.WriteAllTextAsync(Path.Combine(status.AppDirectory!, "a"), "damaged");
+        var recovering = new UpdateEngine(engineRoot, checkpoint: p => { if (interrupt && p == "published") throw new IOException("interrupt"); });
+        var stage = await recovering.StageRecoveryAsync(full, new Assets(input, full));
+        if (interrupt) { await Assert.ThrowsAsync<IOException>(() => recovering.ApplyAsync(stage, new Launcher(true))); await engine.RecoverAsync(new Launcher(true)); Assert.Equal("damaged", await File.ReadAllTextAsync(Path.Combine(status.AppDirectory!, "a"))); }
+        else { await recovering.ApplyAsync(stage, new Launcher(true)); Assert.Equal("good", await File.ReadAllTextAsync(Path.Combine(status.AppDirectory!, "a"))); var quarantine = Path.Combine(engineRoot, "updates", "quarantine"); Assert.Contains(Directory.EnumerateFiles(quarantine, "a", SearchOption.AllDirectories), f => File.ReadAllText(f) == "damaged"); }
+    }
+    [Fact]
+    public async Task RetainsOnePreviousAndTheOnePointZeroAnchor()
+    {
+        var root = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N")); var input = Path.Combine(root, "input"); Directory.CreateDirectory(Path.Combine(input, "app")); var engineRoot = Path.Combine(root, "root"); var engine = new UpdateEngine(engineRoot);
+        TransitionManifest? previous = null; var directories = new List<string>();
+        foreach (var version in new[] { "0.1", "0.2", "1.0", "1.1", "1.2" })
+        {
+            await File.WriteAllTextAsync(Path.Combine(input, "app", "a"), version);
+            var next = UpdatePlanner.CreateManifest(version, previous?.Target, UpdatePlanner.Inventory(input), previous?.Version);
+            await engine.ApplyAsync(await engine.StageAsync(next, new Assets(input, next)), new Launcher(true));
+            directories.Add((await engine.StatusAsync()).AppDirectory!); previous = next;
+        }
+        Assert.False(Directory.Exists(directories[0])); Assert.False(Directory.Exists(directories[1]));
+        Assert.True(Directory.Exists(directories[2])); Assert.True(Directory.Exists(directories[3])); Assert.True(Directory.Exists(directories[4]));
+        Assert.Equal(3, Directory.GetFiles(Path.Combine(engineRoot, "updates", "transactions"), "*.receipt.json").Length);
+    }
+    [Fact]
+    public async Task HistoryRecordsCommittedAndFailedTransactions()
+    {
+        var root = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N")); var input = Path.Combine(root, "input"); Directory.CreateDirectory(Path.Combine(input, "app"));
+        await File.WriteAllTextAsync(Path.Combine(input, "app", "a"), "one"); var engine = new UpdateEngine(Path.Combine(root, "root"));
+        var first = UpdatePlanner.CreateManifest("0.1", null, UpdatePlanner.Inventory(input)); await engine.ApplyAsync(await engine.StageAsync(first, new Assets(input, first)), new Launcher(true));
+        await File.WriteAllTextAsync(Path.Combine(input, "app", "a"), "two"); var next = UpdatePlanner.CreateManifest("0.2", first.Target, UpdatePlanner.Inventory(input), "0.1");
+        await Assert.ThrowsAsync<InvalidOperationException>(() => engine.ApplyAsync(engine.StageAsync(next, new Assets(input, next)).GetAwaiter().GetResult(), new Launcher(false)));
+        var history = await engine.GetHistoryAsync(); Assert.Contains(history, h => h.Outcome == "committed" && h.Version == "0.1"); Assert.Contains(history, h => h.Outcome == "failed" && h.Version == "0.2");
+    }
+    [Fact]
+    public async Task CancellationAfterReadinessStopsCandidateBeforeRestoringPrevious()
+    {
+        var root = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N")); var input = Path.Combine(root, "input"); Directory.CreateDirectory(Path.Combine(input, "app"));
+        await File.WriteAllTextAsync(Path.Combine(input, "app", "a"), "one"); var engine = new UpdateEngine(Path.Combine(root, "root"));
+        var first = UpdatePlanner.CreateManifest("0.1", null, UpdatePlanner.Inventory(input)); await engine.ApplyAsync(await engine.StageAsync(first, new Assets(input, first)), new Launcher(true));
+        await File.WriteAllTextAsync(Path.Combine(input, "app", "a"), "two"); var next = UpdatePlanner.CreateManifest("0.2", first.Target, UpdatePlanner.Inventory(input), "0.1");
+        var stage = await engine.StageAsync(next, new Assets(input, next)); using var cancel = new CancellationTokenSource(); var launcher = new CancelAfterReady(cancel);
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => engine.ApplyAsync(stage, launcher, cancel.Token));
+        Assert.Equal(1, launcher.Stops); Assert.Equal(2, launcher.Launches); Assert.Equal(first.TargetId, (await engine.StatusAsync()).Current!.InventoryId);
+    }
+    private sealed class CancelAfterReady(CancellationTokenSource cancel) : IApplicationLauncher
+    {
+        public bool IsRunning => true;
+        public int Stops { get; private set; } public int Launches { get; private set; }
+        public Task<bool> LaunchAsync(string directory, string token, CancellationToken ct) { if (++Launches == 1) cancel.Cancel(); return Task.FromResult(true); }
+        public Task StopAsync(CancellationToken ct) { Stops++; return Task.CompletedTask; }
+    }
+    [Fact]
+    public async Task InterruptedVersionPruningResumesFromVerifiedQuarantine()
+    {
+        var root = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N")); var input = Path.Combine(root, "input"); Directory.CreateDirectory(Path.Combine(input, "app")); var engineRoot = Path.Combine(root, "root");
+        var engine = new UpdateEngine(engineRoot); TransitionManifest? previous = null; string? oldest = null;
+        foreach (var version in new[] { "0.1", "0.2" }) { await File.WriteAllTextAsync(Path.Combine(input, "app", "a"), version); var manifest = UpdatePlanner.CreateManifest(version, previous?.Target, UpdatePlanner.Inventory(input), previous?.Version); await engine.ApplyAsync(await engine.StageAsync(manifest, new Assets(input, manifest)), new Launcher(true)); oldest ??= (await engine.StatusAsync()).AppDirectory; previous = manifest; }
+        await File.WriteAllTextAsync(Path.Combine(input, "app", "a"), "0.3"); var next = UpdatePlanner.CreateManifest("0.3", previous!.Target, UpdatePlanner.Inventory(input), previous.Version);
+        var crash = new UpdateEngine(engineRoot, checkpoint: p => { if (p == "prune-moved") throw new IOException("interrupted"); }); var stage = await crash.StageAsync(next, new Assets(input, next));
+        await Assert.ThrowsAsync<IOException>(() => crash.ApplyAsync(stage, new Launcher(true))); await engine.RecoverAsync(new Launcher(true));
+        Assert.False(Directory.Exists(oldest)); Assert.False((await engine.StatusAsync()).Pending);
+        Assert.DoesNotContain(Directory.EnumerateDirectories(Path.Combine(engineRoot, "updates", "deleting"), "*", SearchOption.AllDirectories), d => File.Exists(Path.Combine(d, "app", "a")));
+    }
+    [Theory]
+    [InlineData("rollback-restored", false)]
+    [InlineData("rollback-committed", true)]
+    public async Task InterruptedRollbackRespectsCommitPointAndState(string phase, bool committed)
+    {
+        var root = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N")); var input = Path.Combine(root, "input"); Directory.CreateDirectory(Path.Combine(input, "app")); var engineRoot = Path.Combine(root, "root"); var engine = new UpdateEngine(engineRoot);
+        await File.WriteAllTextAsync(Path.Combine(input, "app", "a"), "one"); var first = UpdatePlanner.CreateManifest("0.1", null, UpdatePlanner.Inventory(input)); await engine.ApplyAsync(await engine.StageAsync(first, new Assets(input, first)), new Launcher(true));
+        Directory.CreateDirectory(Path.Combine(engineRoot, "state")); await File.WriteAllTextAsync(Path.Combine(engineRoot, "state", "prefs"), "old"); await File.WriteAllTextAsync(Path.Combine(input, "app", "a"), "two");
+        var second = UpdatePlanner.CreateManifest("0.2", first.Target, UpdatePlanner.Inventory(input), "0.1"); await engine.ApplyAsync(await engine.StageAsync(second, new Assets(input, second)), new Launcher(true));
+        await File.WriteAllTextAsync(Path.Combine(engineRoot, "state", "prefs"), "new");
+        var crash = new UpdateEngine(engineRoot, checkpoint: p => { if (p == phase) throw new IOException("interrupt"); }); await Assert.ThrowsAsync<IOException>(() => crash.RollbackAsync(new Launcher(true)));
+        await engine.RecoverAsync(new Launcher(true)); Assert.Equal(committed ? first.TargetId : second.TargetId, (await engine.StatusAsync()).Current!.InventoryId);
+        Assert.Equal(committed ? "old" : "new", await File.ReadAllTextAsync(Path.Combine(engineRoot, "state", "prefs")));
+    }
+    [Fact]
+    public async Task InterruptedSnapshotPruningResumes()
+    {
+        var root = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N")); var input = Path.Combine(root, "input"); Directory.CreateDirectory(Path.Combine(input, "app")); var engineRoot = Path.Combine(root, "root"); var engine = new UpdateEngine(engineRoot); TransitionManifest? previous = null;
+        foreach (var version in new[] { "0.1", "0.2" }) { await File.WriteAllTextAsync(Path.Combine(input, "app", "a"), version); var manifest = UpdatePlanner.CreateManifest(version, previous?.Target, UpdatePlanner.Inventory(input), previous?.Version); await engine.ApplyAsync(await engine.StageAsync(manifest, new Assets(input, manifest)), new Launcher(true)); previous = manifest; }
+        await File.WriteAllTextAsync(Path.Combine(input, "app", "a"), "0.3"); var next = UpdatePlanner.CreateManifest("0.3", previous!.Target, UpdatePlanner.Inventory(input), previous.Version);
+        var crash = new UpdateEngine(engineRoot, checkpoint: p => { if (p == "snapshot-app-deleted") throw new IOException("interrupted"); }); var stage = await crash.StageAsync(next, new Assets(input, next));
+        await Assert.ThrowsAsync<IOException>(() => crash.ApplyAsync(stage, new Launcher(true))); await engine.RecoverAsync(new Launcher(true)); Assert.False((await engine.StatusAsync()).Pending);
+    }
+    [Fact]
+    public async Task InterruptedResolvedSnapshotPruningResumes()
+    {
+        var root = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N")); var input = Path.Combine(root, "input"); Directory.CreateDirectory(Path.Combine(input, "app")); var engineRoot = Path.Combine(root, "root"); var engine = new UpdateEngine(engineRoot); TransitionManifest? previous = null;
+        foreach (var version in new[] { "0.1", "0.2" }) { await File.WriteAllTextAsync(Path.Combine(input, "app", "a"), version); var manifest = UpdatePlanner.CreateManifest(version, previous?.Target, UpdatePlanner.Inventory(input), previous?.Version); await engine.ApplyAsync(await engine.StageAsync(manifest, new Assets(input, manifest)), new Launcher(true)); previous = manifest; }
+        await engine.RollbackAsync(new Launcher(true)); await engine.AcknowledgeDisplacedStateAsync();
+        var crash = new UpdateEngine(engineRoot, checkpoint: p => { if (p == "snapshot-app-deleted") throw new IOException("interrupted"); });
+        await Assert.ThrowsAsync<IOException>(() => crash.RollbackAsync(new Launcher(true))); await engine.RecoverAsync(new Launcher(true)); Assert.False((await engine.StatusAsync()).Pending);
+    }
+    [Fact]
+    public async Task IdenticalAssetsAcrossAppAndEngineAreTransferredOnce()
+    {
+        var root = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N")); var input = Path.Combine(root, "input"); Directory.CreateDirectory(Path.Combine(input, "app")); Directory.CreateDirectory(Path.Combine(input, "engine"));
+        await File.WriteAllTextAsync(Path.Combine(input, "app", "runtime"), "same bytes"); await File.WriteAllTextAsync(Path.Combine(input, "engine", "runtime"), "same bytes");
+        var manifest = UpdatePlanner.CreateManifest("0.1", null, UpdatePlanner.Inventory(input)); var assets = new CountingAssets(input, manifest); var engine = new UpdateEngine(Path.Combine(root, "root"));
+        await engine.StageAsync(manifest, assets); Assert.Equal(10, manifest.RequiredBytes); Assert.Equal(1, assets.Opens);
+    }
+    private sealed class CountingAssets(string root, TransitionManifest manifest) : IAssetSource
+    {
+        public int Opens { get; private set; }
+        public Task<Stream> OpenAsync(string name, CancellationToken ct) { Opens++; return Task.FromResult<Stream>(File.OpenRead(Path.Combine(root, manifest.Target.First(f => f.Sha256 == name).Path.Replace('/', Path.DirectorySeparatorChar)))); }
+    }
+    [Fact]
+    public async Task FailedPayloadHashLeavesNoOwnedPartialStage()
+    {
+        var root = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N")); var input = Path.Combine(root, "input"); Directory.CreateDirectory(Path.Combine(input, "app"));
+        await File.WriteAllTextAsync(Path.Combine(input, "app", "a"), "good"); var manifest = UpdatePlanner.CreateManifest("0.1", null, UpdatePlanner.Inventory(input)); var engineRoot = Path.Combine(root, "root");
+        await Assert.ThrowsAsync<InvalidDataException>(() => new UpdateEngine(engineRoot).StageAsync(manifest, new BadAssets()));
+        var stages = Path.Combine(engineRoot, "updates", "staging"); Assert.Empty(Directory.EnumerateDirectories(stages));
+    }
+    private sealed class BadAssets : IAssetSource { public Task<Stream> OpenAsync(string name, CancellationToken ct) => Task.FromResult<Stream>(new MemoryStream(System.Text.Encoding.UTF8.GetBytes("evil"))); }
+    [Fact]
+    public async Task ExitedCandidateIsNotCommittedAfterReadiness()
+    {
+        var root = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N")); var input = Path.Combine(root, "input"); Directory.CreateDirectory(Path.Combine(input, "app"));
+        await File.WriteAllTextAsync(Path.Combine(input, "app", "a"), "one"); var engine = new UpdateEngine(Path.Combine(root, "root"));
+        var first = UpdatePlanner.CreateManifest("0.1", null, UpdatePlanner.Inventory(input)); await engine.ApplyAsync(await engine.StageAsync(first, new Assets(input, first)), new Launcher(true));
+        await File.WriteAllTextAsync(Path.Combine(input, "app", "a"), "two"); var next = UpdatePlanner.CreateManifest("0.2", first.Target, UpdatePlanner.Inventory(input), "0.1"); var launcher = new ExitedLauncher();
+        await Assert.ThrowsAsync<InvalidOperationException>(() => engine.ApplyAsync(engine.StageAsync(next, new Assets(input, next)).GetAwaiter().GetResult(), launcher));
+        Assert.Equal(first.TargetId, (await engine.StatusAsync()).Current!.InventoryId); Assert.Equal(1, launcher.Stops); Assert.Equal(2, launcher.Launches);
+    }
+    private sealed class ExitedLauncher : IApplicationLauncher
+    {
+        public bool IsRunning => false; public int Stops { get; private set; } public int Launches { get; private set; }
+        public Task<bool> LaunchAsync(string directory, string token, CancellationToken ct) { Launches++; return Task.FromResult(true); }
+        public Task StopAsync(CancellationToken ct) { Stops++; return Task.CompletedTask; }
+    }
+    [Fact]
+    public async Task InstallRollbackAndReapplyRetainsDisplacedState()
+    {
+        var root = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N")); var input = Path.Combine(root, "input"); Directory.CreateDirectory(Path.Combine(input, "app")); var engineRoot = Path.Combine(root, "root"); var engine = new UpdateEngine(engineRoot);
+        await File.WriteAllTextAsync(Path.Combine(input, "app", "a"), "one"); var first = UpdatePlanner.CreateManifest("0.1", null, UpdatePlanner.Inventory(input)); await engine.ApplyAsync(await engine.StageAsync(first, new Assets(input, first)), new Launcher(true));
+        Directory.CreateDirectory(Path.Combine(engineRoot, "state")); await File.WriteAllTextAsync(Path.Combine(engineRoot, "state", "prefs"), "old");
+        await File.WriteAllTextAsync(Path.Combine(input, "app", "a"), "two"); var next = UpdatePlanner.CreateManifest("0.2", first.Target, UpdatePlanner.Inventory(input), "0.1"); await engine.ApplyAsync(await engine.StageAsync(next, new Assets(input, next)), new Launcher(true));
+        await File.WriteAllTextAsync(Path.Combine(engineRoot, "state", "prefs"), "new"); await engine.RollbackAsync(new Launcher(true)); var displaced = (await engine.StatusAsync()).DisplacedStateDirectory!;
+        await engine.ApplyAsync(await engine.StageAsync(next, new Assets(input, next)), new Launcher(true)); var status = await engine.StatusAsync(); Assert.Equal(next.TargetId, status.Current!.InventoryId); Assert.Equal(first.TargetId, status.Previous!.InventoryId); Assert.Equal("new", await File.ReadAllTextAsync(Path.Combine(displaced, "prefs")));
+    }
+    [Fact]
+    public async Task ApplyRefusesWhileAppOwnsInstanceLock()
+    {
+        var root = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N")); var input = Path.Combine(root, "input"); Directory.CreateDirectory(Path.Combine(input, "app"));
+        await File.WriteAllTextAsync(Path.Combine(input, "app", "a"), "a"); var engineRoot = Path.Combine(root, "root"); var engine = new UpdateEngine(engineRoot); var manifest = UpdatePlanner.CreateManifest("0.1", null, UpdatePlanner.Inventory(input)); var stage = await engine.StageAsync(manifest, new Assets(input, manifest));
+        Directory.CreateDirectory(Path.Combine(engineRoot, "control")); using var appLock = new FileStream(Path.Combine(engineRoot, "control", "app.instance.lock"), FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.Read);
+        await Assert.ThrowsAsync<IOException>(() => engine.ApplyAsync(stage, new Launcher(true))); Assert.False((await engine.StatusAsync()).Pending);
+    }
+    [Fact]
+    public async Task FailedCandidateDoesNotLeaveAnAcceptedVersionDirectory()
+    {
+        var root = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N")); var input = Path.Combine(root, "input"); Directory.CreateDirectory(Path.Combine(input, "app")); var engineRoot = Path.Combine(root, "root"); var engine = new UpdateEngine(engineRoot);
+        await File.WriteAllTextAsync(Path.Combine(input, "app", "a"), "one"); var first = UpdatePlanner.CreateManifest("0.1", null, UpdatePlanner.Inventory(input)); await engine.ApplyAsync(await engine.StageAsync(first, new Assets(input, first)), new Launcher(true));
+        await File.WriteAllTextAsync(Path.Combine(input, "app", "a"), "two"); var second = UpdatePlanner.CreateManifest("0.2", first.Target, UpdatePlanner.Inventory(input), "0.1");
+        await Assert.ThrowsAsync<InvalidOperationException>(() => engine.ApplyAsync(engine.StageAsync(second, new Assets(input, second)).GetAwaiter().GetResult(), new FailOnceLauncher()));
+        Assert.False(Directory.Exists(Path.Combine(engineRoot, "install", "versions", second.TargetId))); Assert.Equal(first.TargetId, (await engine.StatusAsync()).Current!.InventoryId);
+    }
+    private sealed class FailOnceLauncher : IApplicationLauncher
+    {
+        private int calls; public bool IsRunning => true;
+        public Task<bool> LaunchAsync(string directory, string token, CancellationToken ct) => Task.FromResult(++calls > 1);
+        public Task StopAsync(CancellationToken ct) => Task.CompletedTask;
+    }
+    [Fact]
+    public async Task CandidateExitAfterReceiptPreventsCommit()
+    {
+        var root = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N")); var input = Path.Combine(root, "input"); Directory.CreateDirectory(Path.Combine(input, "app")); var engineRoot = Path.Combine(root, "root"); var engine = new UpdateEngine(engineRoot);
+        await File.WriteAllTextAsync(Path.Combine(input, "app", "a"), "one"); var first = UpdatePlanner.CreateManifest("0.1", null, UpdatePlanner.Inventory(input)); await engine.ApplyAsync(await engine.StageAsync(first, new Assets(input, first)), new Launcher(true));
+        await File.WriteAllTextAsync(Path.Combine(input, "app", "a"), "two"); var second = UpdatePlanner.CreateManifest("0.2", first.Target, UpdatePlanner.Inventory(input), "0.1"); var launcher = new MutableLauncher();
+        var closing = new UpdateEngine(engineRoot, checkpoint: p => { if (p == "receipt-written") launcher.Running = false; }); var stage = await closing.StageAsync(second, new Assets(input, second));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => closing.ApplyAsync(stage, launcher)); Assert.Equal(first.TargetId, (await engine.StatusAsync()).Current!.InventoryId); Assert.Equal(1, launcher.Stops);
+        Assert.Single(Directory.GetFiles(Path.Combine(engineRoot, "updates", "transactions"), "*.receipt.json"));
+    }
+    [Fact]
+    public async Task NormalStageRejectsSameOrOlderVersionEvenWithDifferentInventory()
+    {
+        var root = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N")); var input = Path.Combine(root, "input"); Directory.CreateDirectory(Path.Combine(input, "app")); var engine = new UpdateEngine(Path.Combine(root, "root"));
+        await File.WriteAllTextAsync(Path.Combine(input, "app", "a"), "one"); var first = UpdatePlanner.CreateManifest("0.1", null, UpdatePlanner.Inventory(input)); await engine.ApplyAsync(await engine.StageAsync(first, new Assets(input, first)), new Launcher(true));
+        await File.WriteAllTextAsync(Path.Combine(input, "app", "a"), "two"); var same = UpdatePlanner.CreateManifest("0.1.0", first.Target, UpdatePlanner.Inventory(input), "0.1");
+        await Assert.ThrowsAsync<InvalidDataException>(() => engine.StageAsync(same, new Assets(input, same)));
+    }
+    private sealed class MutableLauncher : IApplicationLauncher
+    {
+        public bool Running { get; set; } = true; public bool IsRunning => Running; public int Stops { get; private set; }
+        public Task<bool> LaunchAsync(string directory, string token, CancellationToken ct) => Task.FromResult(true);
+        public Task StopAsync(CancellationToken ct) { Stops++; return Task.CompletedTask; }
+    }
     private sealed class FailingCandidate(string root) : IApplicationLauncher
     {
+        public bool IsRunning => true;
         public int Calls { get; private set; }
+        public Task StopAsync(CancellationToken ct) => Task.CompletedTask;
         public async Task<bool> LaunchAsync(string appDirectory, string transactionToken, CancellationToken cancellationToken)
         {
             Calls++; if (Calls == 1) { await File.WriteAllTextAsync(Path.Combine(root, "state", "prefs"), "after", cancellationToken); return false; } return true;
         }
     }
-    private sealed class Launcher(bool ready) : IApplicationLauncher { public Task<bool> LaunchAsync(string appDirectory, string transactionToken, CancellationToken cancellationToken) => Task.FromResult(ready); }
+    private sealed class Launcher(bool ready) : IApplicationLauncher { public bool IsRunning => true; public Task StopAsync(CancellationToken ct) => Task.CompletedTask; public Task<bool> LaunchAsync(string appDirectory, string transactionToken, CancellationToken cancellationToken) => Task.FromResult(ready); }
     private sealed class Assets(string root, TransitionManifest manifest) : IAssetSource
     {
         public Task<Stream> OpenAsync(string assetName, CancellationToken cancellationToken) => Task.FromResult<Stream>(File.OpenRead(Path.Combine(root, manifest.Target.First(f => f.Sha256 == assetName).Path.Replace('/', Path.DirectorySeparatorChar))));

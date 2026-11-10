@@ -24,7 +24,7 @@ public static class UpdatePlanner
             operations.Add(new(file.Path, kind, kind == "unchanged" ? null : file.Sha256, file.Size, file.Sha256));
         }
         foreach (var file in s.Where(x => !next.ContainsKey(x.Path))) operations.Add(new(file.Path, "delete", null, 0, null));
-        return new(version, sourceVersion, source is null ? null : Identity(s), Identity(t), s, t, operations.ToArray(), operations.Where(x => x.Kind is "add" or "replace").Sum(x => x.Size));
+        return new(version, sourceVersion, source is null ? null : Identity(s), Identity(t), s, t, operations.ToArray(), operations.Where(x => x.Kind is "add" or "replace").DistinctBy(x => x.AssetName).Sum(x => x.Size));
     }
 
     public static string Identity(IEnumerable<InventoryFile> files)
@@ -33,37 +33,24 @@ public static class UpdatePlanner
         return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(canonical))).ToLowerInvariant();
     }
 
-    public static InventoryFile[] Inventory(string directory)
+    public static InventoryFile[] Inventory(string directory) => InventoryCore(directory, false);
+    internal static InventoryFile[] InventoryState(string directory) => InventoryCore(directory, true);
+    private static InventoryFile[] InventoryCore(string directory, bool state)
     {
         var root = Path.GetFullPath(directory);
         if (!Directory.Exists(root)) throw new DirectoryNotFoundException(root);
-        var files = new List<InventoryFile>(); var pending = new Stack<string>(); pending.Push(root);
+        var files = new List<InventoryFile>(); var pending = new Stack<string>(); pending.Push(root); long total = 0; int entries = 0;
         while (pending.Count > 0)
         {
-            var dir = pending.Pop();
-            if ((File.GetAttributes(dir) & FileAttributes.ReparsePoint) != 0) throw new InvalidDataException("Reparse points are forbidden.");
+            var dir = pending.Pop(); if ((File.GetAttributes(dir) & FileAttributes.ReparsePoint) != 0) throw new InvalidDataException("Reparse points are forbidden.");
             foreach (var entry in Directory.EnumerateFileSystemEntries(dir))
             {
-                var attrs = File.GetAttributes(entry);
-                if ((attrs & FileAttributes.ReparsePoint) != 0) throw new InvalidDataException("Reparse points are forbidden.");
-                if ((attrs & FileAttributes.Directory) != 0) pending.Push(entry);
-                else { var info = new FileInfo(entry); using var stream = File.OpenRead(entry); files.Add(new(Path.GetRelativePath(root, entry).Replace('\\', '/'), info.Length, Convert.ToHexString(SHA256.HashData(stream)).ToLowerInvariant())); }
-            }
-        }
-        return Validate(files);
-    }
-
-    internal static InventoryFile[] InventoryState(string directory)
-    {
-        var files = new List<InventoryFile>(); var pending = new Stack<string>(); pending.Push(directory);
-        while (pending.Count > 0)
-        {
-            var dir = pending.Pop(); if ((File.GetAttributes(dir) & FileAttributes.ReparsePoint) != 0) throw new InvalidDataException("Reparse point in state snapshot.");
-            foreach (var entry in Directory.EnumerateFileSystemEntries(dir))
-            {
-                var attrs = File.GetAttributes(entry); if ((attrs & FileAttributes.ReparsePoint) != 0) throw new InvalidDataException("Reparse point in state snapshot.");
-                if ((attrs & FileAttributes.Directory) != 0) pending.Push(entry);
-                else { using var stream = File.OpenRead(entry); files.Add(new("app/" + Path.GetRelativePath(directory, entry).Replace('\\', '/'), new FileInfo(entry).Length, Convert.ToHexString(SHA256.HashData(stream)).ToLowerInvariant())); }
+                if (++entries > 16384) throw new InvalidDataException("Inventory entry limit exceeded.");
+                var attrs = File.GetAttributes(entry); if ((attrs & FileAttributes.ReparsePoint) != 0) throw new InvalidDataException("Reparse points are forbidden.");
+                if ((attrs & FileAttributes.Directory) != 0) { pending.Push(entry); continue; }
+                var info = new FileInfo(entry); if (info.Length > 512L * 1024 * 1024 || (total += info.Length) > 2L * 1024 * 1024 * 1024 || files.Count >= 8192) throw new InvalidDataException("Inventory size limit exceeded.");
+                var relative = Path.GetRelativePath(root, entry).Replace('\\', '/'); if (state) relative = "app/" + relative;
+                using var stream = File.OpenRead(entry); files.Add(new(relative, info.Length, Convert.ToHexString(SHA256.HashData(stream)).ToLowerInvariant()));
             }
         }
         return Validate(files);
@@ -71,18 +58,31 @@ public static class UpdatePlanner
     internal static InventoryFile[] Validate(IEnumerable<InventoryFile> files)
     {
         var result = files.OrderBy(x => x.Path, StringComparer.Ordinal).ToArray();
-        if (result.Length > 8192 || result.Sum(x => x.Size) > 2L * 1024 * 1024 * 1024) throw new InvalidDataException("Inventory exceeds limit.");
+        if (result.Length > 8192 || result.Sum(x => x.Size) > 2L * 1024 * 1024 * 1024 || result.Sum(x => (long)Encoding.UTF8.GetByteCount(x.Path)) > 512 * 1024) throw new InvalidDataException("Inventory exceeds limit.");
         var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var directories = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         foreach (var f in result)
         {
             var parts = f.Path.Split('/');
-            if (parts.Length < 2 || parts[0] is not ("app" or "engine") || f.Path.Contains('\\') || parts.Any(InvalidSegment) || !names.Add(f.Path) || f.Size < 0 || f.Size > 512L * 1024 * 1024 || f.Sha256.Length != 64 || f.Sha256.Any(c => !Uri.IsHexDigit(c)) || f.Sha256 != f.Sha256.ToLowerInvariant()) throw new InvalidDataException("Invalid inventory entry: " + f.Path);
+            if (f.Path.Length > 1024 || parts.Length < 2 || parts[0] is not ("app" or "engine") || f.Path.Contains('\\') || parts.Any(InvalidSegment) || !names.Add(f.Path) || f.Size < 0 || f.Size > 512L * 1024 * 1024 || f.Sha256.Length != 64 || f.Sha256.Any(c => !Uri.IsHexDigit(c)) || f.Sha256 != f.Sha256.ToLowerInvariant()) throw new InvalidDataException("Invalid inventory entry: " + f.Path);
+        }
+        if (result.GroupBy(x => x.Sha256, StringComparer.Ordinal).Any(g => g.Select(x => x.Size).Distinct().Skip(1).Any())) throw new InvalidDataException("Identical content hashes declare different sizes.");
+        foreach (var file in result)
+        {
+            var parts = file.Path.Split('/');
+            for (var length = 1; length < parts.Length; length++)
+            {
+                var dir = string.Join('/', parts.Take(length));
+                if (names.Contains(dir)) throw new InvalidDataException("File and directory paths alias: " + dir);
+                if (directories.TryGetValue(dir, out var existing) && existing != dir) throw new InvalidDataException("Directory case aliases are forbidden: " + dir);
+                directories[dir] = dir;
+            }
         }
         return result;
     }
     private static bool InvalidSegment(string s)
     {
-        if (string.IsNullOrWhiteSpace(s) || s is "." or ".." || s.EndsWith(' ') || s.EndsWith('.') || s.Any(c => c < 32 || "<>:\"|?*".Contains(c))) return true;
+        if (s.Length > 255 || string.IsNullOrWhiteSpace(s) || s is "." or ".." || s.EndsWith(' ') || s.EndsWith('.') || s.Any(c => c < 32 || "<>:\"|?*".Contains(c))) return true;
         var stem = s.Split('.')[0].ToUpperInvariant();
         return stem is "CON" or "PRN" or "AUX" or "NUL" || (stem.Length == 4 && (stem.StartsWith("COM") || stem.StartsWith("LPT")) && stem[3] is >= '1' and <= '9');
     }
