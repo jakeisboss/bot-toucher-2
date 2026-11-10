@@ -112,10 +112,18 @@ public partial class App : Application
         try
         {
             var readiness = Path.Combine(root, "updates", "readiness"); Directory.CreateDirectory(readiness);
-            await using (var stream = new FileStream(Path.Combine(readiness, token + ".ready"), FileMode.CreateNew, FileAccess.Write, FileShare.Read))
+            var marker = Path.Combine(readiness, token + ".ready");
+            var temporary = Path.Combine(readiness, token + "." + Guid.NewGuid().ToString("N") + ".tmp");
+            try
             {
-                var bytes = System.Text.Encoding.UTF8.GetBytes(token); await stream.WriteAsync(bytes); stream.Flush(flushToDisk: true);
+                await using (var stream = new FileStream(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+                {
+                    var bytes = System.Text.Encoding.UTF8.GetBytes(token); await stream.WriteAsync(bytes); stream.Flush(flushToDisk: true);
+                }
+                // Expose readiness only after the complete nonce is durable and its writer is closed.
+                File.Move(temporary, marker);
             }
+            finally { if (File.Exists(temporary)) File.Delete(temporary); }
             // Read-only protocol wait: only the helper may commit or recover a transaction.
             var engine = new UpdateEngine(root);
             using var helper = FindHelper(helperPid);
