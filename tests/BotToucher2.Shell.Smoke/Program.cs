@@ -25,6 +25,13 @@ internal static class Program
             {
                 Check(window.IsVisible && window.IsLoaded, "WPF window launches");
                 Check(Find<Border>(window, "NoticeBorder").IsVisible, "Preference notice is visible");
+                Click(window, "HomeNav");
+                window.UpdateLayout();
+                var home = (HomeView)Find<ContentControl>(window, "WorkspaceHost").Content;
+                var homeText = Descendants<TextBlock>(home).Select(text => text.Text).ToArray();
+                Check(homeText.Contains("APPLICATION INFO") && homeText.Contains("RECENT ACTIVITY"), "Home information and activity surfaces present");
+                Check(homeText.Contains(AppContext.BaseDirectory), "Application Info displays actual install location");
+                Check(homeText.Contains(typeof(HomeView).Assembly.GetName().Version!.ToString(3)), "Application Info displays actual assembly version");
                 foreach (var (button, destination) in new[] {
                     ("HomeNav", Destination.Home), ("PacketNav", Destination.PacketCenter),
                     ("DataNav", Destination.Data), ("LabNav", Destination.Lab),

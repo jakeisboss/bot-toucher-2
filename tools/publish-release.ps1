@@ -2,6 +2,14 @@
 # Explicit release publication only. Requires authenticated gh with release-write permission.
 param([string]$Version = '0.1.0', [string]$PreviousManifest)
 $ErrorActionPreference = 'Stop'
+trap {
+    if ($env:GITHUB_ACTIONS -eq 'true') {
+        $details = ($_ | Out-String) + $_.ScriptStackTrace
+        $escaped = $details.Replace('%','%25').Replace("`r",'%0D').Replace("`n",'%0A')
+        Write-Output "::error title=BT2 release publication failed::$escaped"
+    }
+    throw $_
+}
 Set-Location (Join-Path $PSScriptRoot '..')
 if ($Version -notmatch '^0\.1\.[0-9]+$') { throw 'This release script is limited to approved 0.1 versions' }
 function Run-DotNet { & dotnet @args; if ($LASTEXITCODE -ne 0) { throw "dotnet failed: $args" } }

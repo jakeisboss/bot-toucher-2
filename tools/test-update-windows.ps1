@@ -1,6 +1,14 @@
 #requires -Version 7.0
 # Explicit Windows-only integration proof; never called by production startup.
 $ErrorActionPreference = 'Stop'
+trap {
+    if ($env:GITHUB_ACTIONS -eq 'true') {
+        $details = ($_ | Out-String) + $_.ScriptStackTrace
+        $escaped = $details.Replace('%','%25').Replace("`r",'%0D').Replace("`n",'%0A')
+        Write-Output "::error title=BT2 Windows transaction failed::$escaped"
+    }
+    throw $_
+}
 Set-Location (Join-Path $PSScriptRoot '..')
 $testRoot = Join-Path ([System.IO.Path]::GetTempPath()) ('BT2-update-proof-' + [Guid]::NewGuid().ToString('N'))
 $installRoot = Join-Path $testRoot 'installed'

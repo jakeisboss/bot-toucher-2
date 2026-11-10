@@ -23,7 +23,7 @@ Repository `jakeisboss/bot-toucher`:
 ## Existing BT2 constraints
 
 - `ShellState` is schema 1, including the right-rail selection; removing Widgets requires an explicit compatible preference migration without silently overwriting invalid state.
-- `ShellPreferences` validates and preserves invalid/external data; retain that behavior for shell and widget layout.
+- `ShellPreferences` validates and preserves invalid/external data; retain that behavior for shell layout.
 - `HardwareMonitor` already has application lifetime and tested drain-before-dispose; keep it independent of widget lifetime.
 - Packet Center's 0.0 Update Center placeholder must link to Settings → Updates, not instantiate another updater.
 - The old `bt2-0.0-windows-download` branch contains historical compiled blobs from the previous handoff. Do not add payloads there, rewrite history or delete it as part of this task. All new compiled distribution uses GitHub Release assets.

@@ -1,8 +1,8 @@
 {
   "Version": "0.1.0",
   "PublishRelease": true,
-  "ReviewedSourceCommit": "6596727c39b7a8a91e24d371d126c8c8074f4d1f",
+  "ReviewedSourceCommit": "ba1609d2b24500b581e8107ca7b7c5807154705e",
   "Scope": "One explicit targeted Windows validation and gated GitHub Release publication; no widget/packet/execution work.",
-  "Attempt": 2,
-  "Reason": "Capture failing targeted Windows command output as public check annotation; publication remains gated."
+  "Attempt": 3,
+  "Reason": "Confirm Windows-compatible atomic metadata replacement under held readers; run actual transactions and gated publication."
 }
