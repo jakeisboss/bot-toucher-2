@@ -18,29 +18,9 @@ jobs:
   windows:
     runs-on: windows-latest
     timeout-minutes: 30
-    permissions:
-      contents: read
-      actions: read
     outputs:
       publish_release: ${{ steps.request.outputs.publish_release }}
     steps:
-      - name: Inspect preceding native transition failure
-        shell: pwsh
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          $PSNativeCommandUseErrorActionPreference = $false
-          try {
-            $lines = @(gh api --allow-escape-sequences repos/jakeisboss/bot-toucher-2/actions/jobs/130191778884/logs 2>&1)
-            $result = $LASTEXITCODE
-            $lines = @($lines | ForEach-Object { $_.ToString() -replace '\x1b\[[0-?]*[ -/]*[@-~]', '' })
-            if ($result -ne 0) { $details = ($lines | Out-String) }
-            else { $details = ($lines | Select-String -Pattern 'Managed inventory|Candidate|readiness|Updater failed|could not|Exception|mismatch|denied|cannot|source install' -Context 3,3 | Select-Object -Last 30 | Out-String) }
-          } catch { $details = ($_ | Out-String) }
-          if ($details.Length -gt 16000) { $details = $details.Substring($details.Length - 16000) }
-          $escaped = $details.Replace('%','%25').Replace("`r",'%0D').Replace("`n",'%0A')
-          Write-Output "::notice title=Preceding native failure evidence::$escaped"
-          exit 0
       - uses: actions/checkout@v4
       - name: Read explicit validation request
         id: request

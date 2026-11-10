@@ -1,6 +1,6 @@
 # Bot Toucher 2 — corrected 0.1 handoff
 
-**0.1 scope: shell/UI refinement and one manual updater only. Windows and live GitHub Release verification remain explicitly UNVERIFIED in this cloud environment.**
+**0.1 scope: shell/UI refinement and one manual updater only. All 121 Windows tests, WPF smoke and real update/rollback/reapply/recovery passed. Remaining physical/standard-user acceptance is explicitly UNVERIFIED.**
 
 ## 1. Corrected 0.1 scope
 
@@ -40,7 +40,7 @@ Default root: `%LOCALAPPDATA%/BotToucher2`, without elevation. Immutable paired 
 
 One public HTTPS repository and numeric release channel, including prereleases; no automatic background checks/downloads/installs. `bt2-release.json` is bounded lightweight metadata. Source-specific transition JSON binds exact source version/ID and complete target inventory/operations/hash/size. Assets named by SHA-256 contain changed/new bytes only; initial bootstrap contains a source-null full manifest and content-addressed assets. Binary patches are deferred. Compiled payloads/bootstrap ZIPs belong only in GitHub Release assets.
 
-`tools/publish-release.ps1` and the explicit manual Windows workflow implement the publication route. Live API access is denied by the cloud proxy, so no release upload or working binary download link is claimed. No new compiled Git blobs were used. The historical 0.0 download branch was not rewritten/deleted by this task.
+`tools/publish-release.ps1` and the explicit Windows workflow published [v0.1.0](https://github.com/jakeisboss/bot-toucher-2/releases/tag/v0.1.0), built from `9d6177256ffd59fab49f0f161b1b64c95fc7befd`, after native checks. The real public metadata/manifest check passed without payload download. [Windows bootstrap ZIP](https://github.com/jakeisboss/bot-toucher-2/releases/download/v0.1.0/BotToucher2-0.1.0-bootstrap-win-x64.zip): extract completely and run `bootstrap.ps1`; it installs and launches the application. The installed executable is `install/versions/<inventory-id>/app/BotToucher2.exe`. No new compiled Git blobs were used. The historical 0.0 download branch was not rewritten/deleted by this task.
 
 ## 8. Delta/update-size evidence
 
@@ -52,7 +52,18 @@ Status reads bounded receipt metadata without installed-file/payload scanning. M
 
 ## 10. Exact verification
 
-Local source verification at `034d100` passed 111/111 tests: 60 updater, 33 core and 18 release/dispatch tests, with zero failures/skips. Release build passed with zero warnings/errors. Native Windows verification is being requested separately and is not inferred from these results. The reproducible commands are:
+Local source verification at `b418643` passed 119 tests: 66 updater, 33 core and 20 release/dispatch tests, with zero failures. Two native Windows sharing tests were explicitly skipped on Linux (121 tests total). Release build passed with zero warnings/errors. Final Windows Actions run [42922016748](https://github.com/jakeisboss/bot-toucher-2/actions/runs/42922016748), source `9d61772`, passed all 121 tests, WPF smoke, real install/update/source-mismatch refusal/rollback/reapply, managed full recovery, retained-engine pruning, readiness and public release-index access. Earlier native failures exposed and fixed atomic metadata sharing, process-output inheritance, PowerShell argument splitting and readiness publication; EVIDENCE.md records causes and outcomes. The Windows workflow executed:
+
+```powershell
+./tools/check-windows.ps1
+./tools/test-update-windows.ps1
+# Independent fresh-root checks before and after publication:
+dotnet run --project src/BotToucher2.Updater -c Release --no-build -- check --root <fresh-probe-root>
+./tools/publish-release.ps1 -Version 0.1.0
+<published-helper>/BotToucher2.Updater.exe check --root <fresh-probe-root>
+```
+
+The local reproducible build/test commands are:
 
 ```text
 tools/dotnet.sh clean BotToucher2.sln -c Release
@@ -62,26 +73,26 @@ tools/dotnet.sh publish src/BotToucher2.App -c Release -r win-x64 --self-contain
 tools/dotnet.sh publish src/BotToucher2.Updater -c Release -r win-x64 --self-contained true -o <engine-output>
 ```
 
-External CLI status/help, real packaging generation and a live manual check were executed. The live check failed nonzero with a proxy-tunnel HTTP 403, which was reported rather than interpreted as successful access. No Windows GUI, physical interaction or actual Windows transaction result is inferred from these commands.
+External CLI status/help, real packaging generation and a live manual check were executed. The live check failed nonzero with a proxy-tunnel HTTP 403, which was reported rather than interpreted as successful access. Windows WPF evidence comes from the actual Windows Actions run, rather than these Linux commands. Actual transactions were separately verified on Windows; physical interactions remain explicitly unverified.
 
 Independent reviews covered frontend and shared-engine paths, followed by whole-branch integration. Findings were addressed with targeted regressions: interrupted state/worker preparation, paired entrypoints, recovery relaunch/retention, candidate close/helper lifetime and concurrent metadata/cleanup consistency. Exact final results are recorded in the accompanying verification summary.
 
 ## 11. Every corrected 0.1 DoD item
 
-PASS identifies the stated structural/portable evidence, not a hidden Windows acceptance claim. UNVERIFIED identifies a required native/UI/live-service check not executed here. There are no widget acceptance items.
+PASS identifies the stated structural/portable evidence, not a hidden Windows acceptance claim. UNVERIFIED identifies a remaining physical/UI/standard-user check, rather than an inferred acceptance claim. There are no widget acceptance items.
 
 | ID | Status | Evidence / limit |
 |---|---|---|
 | S01 | UNVERIFIED | Cohesive dark templates compile; Windows visual/focus/selection review unrun |
 | S02 | PASS | Right-rail Widgets tab removed from compiled shell |
 | S03 | PASS | Right rail contains Context and separate built-in monitor |
-| S04 | UNVERIFIED | Real assembly/path info implemented; actual Windows view unrun |
-| S05 | UNVERIFIED | Real bounded activity tests pass; Windows Home/Activity interactions unrun |
+| S04 | PASS | Real WPF smoke verifies Home actual assembly version/install path |
+| S05 | PASS | Windows Home surface and real activity selection/refresh/error-recovery checks pass |
 | S06 | PASS | Lab remains empty content boundary; no execution/results model |
 | S07 | PASS | Settings owns Updates; old entry routes there |
 | S08 | PASS | Startup call graph contains no checks/installs/tests/benchmarks/workloads |
 | U01 | PASS | One engine shared by UI/external CLI, one transaction record/lease |
-| U02 | UNVERIFIED | Manual public release client fixture-tested; real API proxy denied |
+| U02 | PASS | Actual public GitHub index and published metadata/manifest check pass on Windows |
 | U03 | PASS | Metadata-only check/status tests and CLI evidence; no payload scan |
 | U04 | PASS | Exact source version/hash mismatch tests preserve installation |
 | U05 | PASS | Canonical source/target identities, hashes and four operation kinds |
@@ -90,21 +101,21 @@ PASS identifies the stated structural/portable evidence, not a hidden Windows ac
 | U08 | PASS | Payload size/hash failure and cleanup tests |
 | U09 | PASS | Complete paired target staged before live activation |
 | U10 | PASS | Full staged inventory checked again before apply |
-| U11 | UNVERIFIED | Portable transaction/recovery passes; native shutdown/locks/apply pending |
+| U11 | PASS | Final real Windows install/update/shutdown/apply/recovery proof passes; interruption regressions also pass |
 | U12 | PASS | Installed hashes/readiness-bound receipt precede commit; native readiness U18 |
 | U13 | PASS | Durable hashed receipt/journal and bounded history tests |
 | U14 | PASS | One previous pair retained; durable 1.0 anchor protected in tests |
 | U15 | PASS | Failure cases preserve existing known-good rollback |
-| U16 | UNVERIFIED | Portable restore/hash/readiness proof; actual Windows rollback unrun |
-| U17 | PASS | Real standalone CLI executed without WPF; native managed-worker checks pending |
-| U18 | UNVERIFIED | Process/readiness frontend cross-built; real Windows relaunch unrun |
+| U16 | PASS | Real Windows rollback and reapply pass, with receipt/state/integrity regressions |
+| U17 | PASS | Real standalone and managed Windows external invocation/recovery/pruning pass |
+| U18 | PASS | Actual Windows update/rollback/recovery relaunch and readiness pass |
 | U19 | UNVERIFIED | Console/log errors verified; Windows native/UI error presentation unrun |
-| U20 | PASS | Separate per-user paths and no elevation request; Windows ACL check pending |
+| U20 | UNVERIFIED | Separate per-user paths/no elevation implemented; actual standard-user Windows ACL acceptance unrun |
 | U21 | PASS | Explicit user actions only; no apply-on-close or startup work |
 | U22 | PASS | Publication scripts use Release assets; no new binary Git blobs/upload claim |
-| V01 | PASS | Final portable tests/build results below |
-| V02 | UNVERIFIED | Actual Windows launch/physical interaction not run |
-| V03 | UNVERIFIED | Actual Windows update/rollback/reapply not run |
+| V01 | PASS | 119 Linux passes +2 native-only skips; all121 pass on Windows; Release builds/WPF smoke pass |
+| V02 | UNVERIFIED | Automated Windows WPF launch/navigation/rail/activity checks pass; physical visual acceptance remains unrun |
+| V03 | PASS | Final native update/rollback/reapply/recovery proof passes; failure regressions run on Windows |
 | V04 | PASS | All Windows claims explicitly bounded; cross-build distinguished |
 | V05 | PASS | Source/payload/stage/restore/interruption/retention/readiness failures tested |
 | V06 | PASS | Corrected design, provenance, paths/formats, commands and evidence documented |
@@ -112,17 +123,18 @@ PASS identifies the stated structural/portable evidence, not a hidden Windows ac
 
 ## 12. Known limitations
 
-- This host cannot launch WPF. Native Windows process exit/sharing, actual GUI/helper handshake, physical resizing, ACLs and UI acceptance remain UNVERIFIED.
-- Cloud proxy denies the live GitHub API request; Releases check, upload and a published executable link remain UNVERIFIED. The manual workflow/release script is the intended next route, not Git binary commits.
+- Linux cannot launch WPF. Automated WPF launch/navigation/rail/activity and native sharing tests passed on Windows Actions. Physical visual review, actual hardware/ACL behavior and manual helper-termination interactions remain UNVERIFIED.
+- Cloud proxy still denies direct API access from Linux; actual Windows Release check, upload and post-publication metadata verification passed. Distribution is the verified GitHub Release asset, never a normal binary Git commit.
 - Physical power-loss persistence and hostile same-user directory swaps are not proven by managed path checks/flush calls. No sandbox or publisher-signature system is claimed.
 - Abrupt preparation interruption can leave orphan staging data; distinct verified worker caches and intentionally quarantined unexpected bytes remain recoverable evidence. They are not a growing accepted rollback chain and are not blindly deleted.
 - A damaged selected 1.0 anchor must be repaired by same-inventory recovery before changing it; ordinary rotation never discards the anchor.
+- Initial 0.1 installation uses the full bootstrap because a loose 0.0 folder has no verified managed inventory. Future Release publication must supply the exact previous manifest to generate its source-specific delta; incompatible or unknown sources are refused rather than silently replaced.
 - Rollback's state consequence is explicit: later changes are preserved in displaced-state evidence, not silently merged into older schemas. Acknowledge only after saving/resolving them.
 - The .NET test SDK emits a nonfatal artifact-directory fallback notice; fresh TRX counts/exit status remain authoritative.
 
 ## 13. 0.2 readiness
 
-The shell content boundary, real activity and manual updater are available as a base. No widget, packet or execution contracts were invented. 0.2 requires its own design and approval, and Windows/live-service acceptance of 0.1 is still outstanding. No 0.2 implementation was started.
+The shell content boundary, real activity and verified manual updater are available as a base. No widget, packet or execution contracts were invented. 0.2 requires its own design and approval, with remaining physical visual/standard-user checks explicitly outstanding. No 0.2 implementation was started.
 
 ## 14. Final Git state
 

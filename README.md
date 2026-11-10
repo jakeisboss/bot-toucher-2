@@ -30,6 +30,8 @@ SDK bootstrap verifies the official artifact checksum before extraction. Where t
 
 ## Install and updates
 
+[Download the Windows 0.1.0 bootstrap ZIP](https://github.com/jakeisboss/bot-toucher-2/releases/download/v0.1.0/BotToucher2-0.1.0-bootstrap-win-x64.zip). Extract completely and run `bootstrap.ps1` to install and launch BT2. [Windows verification results](docs/0.1/HANDOFF.md) distinguish automated checks from remaining physical acceptance.
+
 Compiled distribution belongs in **GitHub Release assets**, not Git history. A release bootstrap ZIP includes content-addressed assets, a full manifest and `bootstrap.ps1`. Extract the whole trusted release and run that script explicitly for a per-user non-admin install under `%LOCALAPPDATA%/BotToucher2`.
 
 Settings → Updates opens using small local state only. Check manually retrieves metadata/manifest, not payloads. Install verifies exact source bytes, downloads changed/new content only, reconstructs and verifies a complete target, and hands off to the shared external updater after orderly shutdown. Unchanged and deleted files require no payload download. Identical app/engine blobs download once. Binary patches are deferred.
