@@ -23,9 +23,17 @@ function Run-Updater {
 }
 function Read-SharedJson {
     param([string]$Path)
-    $stream = [System.IO.File]::Open($Path, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, ([System.IO.FileShare]::ReadWrite -bor [System.IO.FileShare]::Delete))
-    $reader = [System.IO.StreamReader]::new($stream)
-    try { return ($reader.ReadToEnd() | ConvertFrom-Json) } finally { $reader.Dispose() }
+    $reader = $null
+    try {
+        $stream = [System.IO.File]::Open($Path, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, ([System.IO.FileShare]::ReadWrite -bor [System.IO.FileShare]::Delete))
+        $reader = [System.IO.StreamReader]::new($stream)
+        return ($reader.ReadToEnd() | ConvertFrom-Json)
+    } catch [System.IO.IOException] {
+        # ReplaceFile can briefly block a new reader. Only that native sharing/lock
+        # condition is pending; corruption, permissions and other I/O errors fail.
+        if (($_.Exception.HResult -band 0xffff) -in @(32,33)) { return $null }
+        throw
+    } finally { if ($reader) { $reader.Dispose() } }
 }
 function Run-ManagedUpdater {
     param([string]$Executable)
