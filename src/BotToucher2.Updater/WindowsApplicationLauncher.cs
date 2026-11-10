@@ -17,7 +17,9 @@ public sealed class WindowsApplicationLauncher(string root) : IApplicationLaunch
         var readiness = Path.Combine(root, "updates", "readiness"); Directory.CreateDirectory(readiness);
         var marker = Path.Combine(readiness, transactionToken + ".ready");
         if (File.Exists(marker)) throw new IOException("Readiness marker already exists.");
-        var start = new ProcessStartInfo(Path.Combine(appDirectory, "BotToucher2.exe")) { UseShellExecute = false, WorkingDirectory = appDirectory };
+        // A surviving app must not retain the updater caller's redirected pipes.
+        // ShellExecuteEx returns the process handle used by readiness/stop checks.
+        var start = new ProcessStartInfo(Path.Combine(appDirectory, "BotToucher2.exe")) { UseShellExecute = true, WorkingDirectory = appDirectory };
         start.ArgumentList.Add("--bt2-root"); start.ArgumentList.Add(root);
         start.ArgumentList.Add("--bt2-ready"); start.ArgumentList.Add(transactionToken);
         start.ArgumentList.Add("--bt2-helper-pid"); start.ArgumentList.Add(Environment.ProcessId.ToString(System.Globalization.CultureInfo.InvariantCulture));

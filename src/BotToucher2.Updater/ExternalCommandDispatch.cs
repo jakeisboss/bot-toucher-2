@@ -44,7 +44,14 @@ public static class ExternalCommandDispatch
     public static ProcessStartInfo WorkerStartInfo(string worker, string[] forwarded)
     {
         // Both loaded images and the process CWD must be outside mutation targets.
-        var start = new ProcessStartInfo(Path.Combine(worker, "BotToucher2.Updater.exe")) { UseShellExecute = false, WorkingDirectory = worker };
+        // Direct CreateProcess inherits the caller's pipe handles on Windows. The
+        // shell boundary launches this verified executable without retaining those
+        // handles, while still returning an owned process handle for supervision.
+        var start = new ProcessStartInfo(Path.Combine(worker, "BotToucher2.Updater.exe"))
+        {
+            UseShellExecute = OperatingSystem.IsWindows(), WorkingDirectory = worker,
+            WindowStyle = OperatingSystem.IsWindows() ? ProcessWindowStyle.Hidden : ProcessWindowStyle.Normal
+        };
         foreach (var arg in forwarded) start.ArgumentList.Add(arg);
         return start;
     }
