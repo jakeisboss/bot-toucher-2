@@ -9,9 +9,9 @@ public sealed record InstallationIdentity(string Version, string InventoryId);
 public sealed record UpdateStatus(InstallationIdentity? Current, InstallationIdentity? Previous, string? AppDirectory, string? EngineDirectory, bool Pending);
 internal sealed record Receipt(InstallationIdentity Identity, InventoryFile[] Inventory);
 internal sealed record InstallRecord(Receipt Current, Receipt? Previous, string TransactionId, string? PreviousStateSnapshot);
-internal sealed record Journal(string TransactionId, InstallRecord? Before, Receipt Candidate, string StateSnapshot);
+internal sealed record Journal(string TransactionId, InstallRecord? Before, Receipt Candidate, string StateSnapshot, bool Recovery = false);
 internal sealed record Snapshot(InventoryFile[] Inventory, string Digest);
-internal sealed record Stage(TransitionManifest Manifest, string Digest);
+internal sealed record Stage(TransitionManifest Manifest, string Digest, bool Recovery, string? ExpectedCurrent);
 
 public sealed class UpdateEngine
 {
@@ -45,14 +45,18 @@ public sealed class UpdateEngine
         var record = await Read<InstallRecord>(CurrentPath, cancellationToken);
         return new(record?.Current.Identity, record?.Previous?.Identity, record is null ? null : Path.Combine(Bundle(record.Current.Identity.InventoryId), "app"), record is null ? null : Path.Combine(Bundle(record.Current.Identity.InventoryId), "engine"), File.Exists(JournalPath));
     }
-    public async Task<string> StageAsync(TransitionManifest manifest, IAssetSource assets, CancellationToken cancellationToken = default)
+    public Task<string> StageAsync(TransitionManifest manifest, IAssetSource assets, CancellationToken cancellationToken = default) => StageCore(manifest, assets, false, cancellationToken);
+    public Task<string> StageRecoveryAsync(TransitionManifest manifest, IAssetSource assets, CancellationToken cancellationToken = default) => StageCore(manifest, assets, true, cancellationToken);
+    private async Task<string> StageCore(TransitionManifest manifest, IAssetSource assets, bool recovery, CancellationToken cancellationToken)
     {
         using var lease = Lease(); ValidateManifest(manifest);
         if (File.Exists(JournalPath)) throw new InvalidOperationException("Recovery is required.");
         var current = await Read<InstallRecord>(CurrentPath, cancellationToken);
-        if ((current?.Current.Identity.InventoryId != manifest.SourceId || current?.Current.Identity.Version != manifest.SourceVersion)) throw new InvalidDataException("Source identity mismatch.");
-        if (current is not null) Verify(Bundle(current.Current.Identity.InventoryId), current.Current);
-        var id = Token() + "-" + Digest(manifest); var dir = StageRoot(id); var target = Path.Combine(dir, "bundle"); Directory.CreateDirectory(target);
+        if (recovery) { if (current is null || manifest.SourceId is not null) throw new InvalidDataException("Recovery requires an existing installation and full manifest."); }
+        else { if ((current?.Current.Identity.InventoryId != manifest.SourceId || current?.Current.Identity.Version != manifest.SourceVersion)) throw new InvalidDataException("Source identity mismatch."); if (current is not null) Verify(Bundle(current.Current.Identity.InventoryId), current.Current); }
+        var expectedCurrent = recovery ? Digest(current) : null;
+        var stageDigest = Digest(new { manifest, recovery, expectedCurrent });
+        var id = Token() + "-" + stageDigest; var dir = StageRoot(id); var target = Path.Combine(dir, "bundle"); Directory.CreateDirectory(target);
         foreach (var operation in manifest.Operations.Where(x => x.Kind != "delete"))
         {
             var destination = SafeFile(target, operation.Path); Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
@@ -63,7 +67,7 @@ public sealed class UpdateEngine
             if (count != operation.Size) throw new InvalidDataException("Asset size mismatch.");
         }
         Verify(target, new(new(manifest.Version, manifest.TargetId), manifest.Target));
-        await Write(Path.Combine(dir, "stage.json"), new Stage(manifest, Digest(manifest)), cancellationToken); events?.Invoke("Update staged."); return id;
+        await Write(Path.Combine(dir, "stage.json"), new Stage(manifest, stageDigest, recovery, expectedCurrent), cancellationToken); events?.Invoke("Update staged."); return id;
     }
     public async Task ApplyAsync(string stageId, IApplicationLauncher launcher, CancellationToken cancellationToken = default)
     {
@@ -71,14 +75,14 @@ public sealed class UpdateEngine
         using var lease = Lease(); using var appLease = AppLease();
         if (File.Exists(JournalPath)) throw new InvalidOperationException("Recovery is required.");
         var stage = await Read<Stage>(Path.Combine(StageRoot(stageId), "stage.json"), cancellationToken) ?? throw new InvalidDataException("Stage not found.");
-        ValidateManifest(stage.Manifest); if (Digest(stage.Manifest) != stage.Digest || stageId[33..] != stage.Digest) throw new InvalidDataException("Stage digest mismatch.");
+        ValidateManifest(stage.Manifest); if (Digest(new { manifest = stage.Manifest, recovery = stage.Recovery, expectedCurrent = stage.ExpectedCurrent }) != stage.Digest || stageId[33..] != stage.Digest) throw new InvalidDataException("Stage digest mismatch.");
         var before = await Read<InstallRecord>(CurrentPath, cancellationToken);
-        if ((before?.Current.Identity.InventoryId != stage.Manifest.SourceId || before?.Current.Identity.Version != stage.Manifest.SourceVersion)) throw new InvalidDataException("Source identity mismatch.");
-        if (before is not null) Verify(Bundle(before.Current.Identity.InventoryId), before.Current);
+        if (stage.Recovery) { if (before is null || stage.Manifest.SourceId is not null || Digest(before) != stage.ExpectedCurrent) throw new InvalidDataException("Recovery source changed."); if (before.Current.Identity.InventoryId == stage.Manifest.TargetId) throw new InvalidOperationException("Recovery to the same inventory requires quarantine support."); }
+        else { if ((before?.Current.Identity.InventoryId != stage.Manifest.SourceId || before?.Current.Identity.Version != stage.Manifest.SourceVersion)) throw new InvalidDataException("Source identity mismatch."); if (before is not null) Verify(Bundle(before.Current.Identity.InventoryId), before.Current); }
         var candidate = new Receipt(new(stage.Manifest.Version, stage.Manifest.TargetId), stage.Manifest.Target);
         Verify(Path.Combine(StageRoot(stageId), "bundle"), candidate);
         var transaction = Token(); var snapshot = await CaptureState(transaction, cancellationToken);
-        var journal = new Journal(transaction, before, candidate, snapshot); await Write(JournalPath, journal, cancellationToken);
+        var journal = new Journal(transaction, before, candidate, snapshot, stage.Recovery); await Write(JournalPath, journal, cancellationToken);
         var bundle = Bundle(candidate.Identity.InventoryId); Directory.CreateDirectory(Path.GetDirectoryName(bundle)!);
         if (Directory.Exists(bundle)) Verify(bundle, candidate); else Directory.Move(Path.Combine(StageRoot(stageId), "bundle"), bundle);
         Verify(bundle, candidate); appLease.Dispose();
@@ -87,7 +91,7 @@ public sealed class UpdateEngine
         catch { await Abort(journal, launcher, CancellationToken.None); throw; }
         if (!ready) { await Abort(journal, launcher, CancellationToken.None); events?.Invoke("Candidate readiness failed."); throw new InvalidOperationException("Candidate did not become ready."); }
         await Write(Path.Combine(root, "updates", "transactions", transaction + ".receipt.json"), new { candidate, Digest = Digest(candidate) }, cancellationToken);
-        await Write(CurrentPath, new InstallRecord(candidate, before?.Current, transaction, snapshot), cancellationToken);
+        await Write(CurrentPath, new InstallRecord(candidate, stage.Recovery ? before?.Previous : before?.Current, transaction, stage.Recovery ? before?.PreviousStateSnapshot : snapshot), cancellationToken);
         File.Delete(JournalPath); events?.Invoke("Update committed.");
     }
     private string SnapshotRoot(string id) { CheckToken(id); return Path.Combine(root, "updates", "snapshots", id); }
@@ -128,7 +132,7 @@ public sealed class UpdateEngine
     private async Task Abort(Journal journal, IApplicationLauncher launcher, CancellationToken ct)
     {
         await RestoreState(journal.StateSnapshot, ct);
-        if (journal.Before is not null) { Verify(Bundle(journal.Before.Current.Identity.InventoryId), journal.Before.Current); if (!await launcher.LaunchAsync(Path.Combine(Bundle(journal.Before.Current.Identity.InventoryId), "app"), Token(), ct)) throw new InvalidOperationException("Previous application did not become ready; recovery remains pending."); }
+        if (!journal.Recovery && journal.Before is not null) { Verify(Bundle(journal.Before.Current.Identity.InventoryId), journal.Before.Current); if (!await launcher.LaunchAsync(Path.Combine(Bundle(journal.Before.Current.Identity.InventoryId), "app"), Token(), ct)) throw new InvalidOperationException("Previous application did not become ready; recovery remains pending."); }
         File.Delete(JournalPath);
     }
     public async Task RollbackAsync(IApplicationLauncher launcher, CancellationToken cancellationToken = default)

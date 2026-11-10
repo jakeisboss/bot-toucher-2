@@ -100,6 +100,19 @@ public class EngineTests
         var next = UpdatePlanner.CreateManifest("0.2", first.Target, first.Target, "0.1");
         await Assert.ThrowsAsync<InvalidDataException>(() => engine.StageAsync(next, new Assets(input, next)));
     }
+    [Fact]
+    public async Task ExplicitFullRecoveryReplacesDamagedCurrentWithoutPromotingItToRollback()
+    {
+        var root = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N")); var input = Path.Combine(root, "input"); Directory.CreateDirectory(Path.Combine(input, "app"));
+        await File.WriteAllTextAsync(Path.Combine(input, "app", "a"), "one"); var engine = new UpdateEngine(Path.Combine(root, "root"));
+        var first = UpdatePlanner.CreateManifest("0.1", null, UpdatePlanner.Inventory(input)); await engine.ApplyAsync(await engine.StageAsync(first, new Assets(input, first)), new Launcher(true));
+        var old = await engine.StatusAsync(); await File.WriteAllTextAsync(Path.Combine(old.AppDirectory!, "a"), "tampered");
+        await File.WriteAllTextAsync(Path.Combine(input, "app", "a"), "recovered");
+        var full = UpdatePlanner.CreateManifest("0.2", null, UpdatePlanner.Inventory(input));
+        var stage = await engine.StageRecoveryAsync(full, new Assets(input, full)); await engine.ApplyAsync(stage, new Launcher(true));
+        var status = await engine.StatusAsync(); Assert.Equal(full.TargetId, status.Current!.InventoryId); Assert.Null(status.Previous);
+        Assert.Equal("tampered", await File.ReadAllTextAsync(Path.Combine(old.AppDirectory!, "a")));
+    }
     private sealed class FailingCandidate(string root) : IApplicationLauncher
     {
         public int Calls { get; private set; }
