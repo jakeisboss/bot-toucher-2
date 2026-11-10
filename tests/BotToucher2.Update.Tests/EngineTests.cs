@@ -527,6 +527,24 @@ public class EngineTests
         Assert.True(changed); Assert.False(status.Pending); Assert.Equal(next.TargetId, status.Current!.InventoryId);
     }
     [Fact]
+    public async Task CommitReplacesCurrentWhilePriorMetadataReaderRemainsOpen()
+    {
+        var root = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N")); var input = Path.Combine(root, "input"); CreateInput(input);
+        var engineRoot = Path.Combine(root, "root"); var engine = new UpdateEngine(engineRoot);
+        var first = UpdatePlanner.CreateManifest("0.1.0", null, UpdatePlanner.Inventory(input));
+        await engine.ApplyAsync(await engine.StageAsync(first, new Assets(input, first)), new Launcher(true));
+        var currentPath = Path.Combine(engineRoot, "install", "current.json");
+        var original = await File.ReadAllBytesAsync(currentPath);
+        await using var reader = new FileStream(currentPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+        File.WriteAllText(Path.Combine(input, "app", "data"), "second");
+        var second = UpdatePlanner.CreateManifest("0.1.1", first.Target, UpdatePlanner.Inventory(input), first.Version);
+        await engine.ApplyAsync(await engine.StageAsync(second, new Assets(input, second)), new Launcher(true));
+        var heldBytes = new byte[original.Length]; await reader.ReadExactlyAsync(heldBytes);
+        Assert.Equal(original, heldBytes); Assert.Equal(-1, reader.ReadByte());
+        var status = await engine.StatusAsync(); Assert.False(status.Pending); Assert.Equal(second.TargetId, status.Current!.InventoryId);
+        Assert.Empty(Directory.GetFiles(Path.GetDirectoryName(currentPath)!, "*.tmp"));
+    }
+    [Fact]
     public async Task ConcurrentStatusReadersSurviveFortyUpdatesAndReceiptPruning()
     {
         var root = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N")); var input = Path.Combine(root, "input"); CreateInput(input);

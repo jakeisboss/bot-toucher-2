@@ -69,7 +69,9 @@ public static class ExternalCommandDispatch
         {
             await using (var file = new FileStream(temp, FileMode.CreateNew, FileAccess.Write, FileShare.None))
             { await JsonSerializer.SerializeAsync(file, result); await file.FlushAsync(); file.Flush(true); }
-            File.Move(temp, path, true);
+            // Result pollers can hold Ready open while the worker publishes its outcome.
+            if (File.Exists(path)) File.Replace(temp, path, null);
+            else File.Move(temp, path);
         }
         finally { if (File.Exists(temp)) File.Delete(temp); }
     }

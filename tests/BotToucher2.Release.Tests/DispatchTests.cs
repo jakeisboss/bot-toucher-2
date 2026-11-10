@@ -40,6 +40,18 @@ public sealed class DispatchTests
         var result = await ExternalCommandDispatch.ReadResultAsync(root, token);
         Assert.Equal("Failed", result!.State); Assert.Equal(1, result.ExitCode); Assert.Equal("candidate failed", result.Error); Assert.Equal("output", result.Output);
     }
+    [Fact]
+    public async Task CompletedResultReplacesReadyWhilePollingReaderRemainsOpen()
+    {
+        var root = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N")); var token = new string('e', 32);
+        await ExternalCommandDispatch.WriteResultAsync(root, token, new("Ready", null, "", ""));
+        await using var held = new FileStream(ExternalCommandDispatch.ResultPath(root, token), FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+        await ExternalCommandDispatch.WriteResultAsync(root, token, new("Completed", 0, "finished", ""));
+        var original = await System.Text.Json.JsonSerializer.DeserializeAsync<ExternalCommandResult>(held);
+        Assert.Equal("Ready", original!.State);
+        var current = await ExternalCommandDispatch.ReadResultAsync(root, token);
+        Assert.Equal("Completed", current!.State); Assert.Equal(0, current.ExitCode); Assert.Equal("finished", current.Output);
+    }
     [Theory]
     [InlineData("app")][InlineData("engine")]
     public async Task PackageRejectsOutputInsideInputBeforeCreatingBundle(string role)

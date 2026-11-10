@@ -60,7 +60,13 @@ public sealed class UpdateEngine
     {
         var bytes = await ReadMetadata(path, ct); return bytes is null ? default : DecodeMetadata<T>(bytes);
     }
-    private static async Task Write<T>(string path, T value, CancellationToken ct) { Guard(path); Directory.CreateDirectory(Path.GetDirectoryName(path)!); Guard(path); var temp = path + "." + Token() + ".tmp"; try { await using (var f = new FileStream(temp, FileMode.CreateNew, FileAccess.Write, FileShare.None, 4096, FileOptions.WriteThrough)) { await JsonSerializer.SerializeAsync(f, value, Json, ct); if (f.Length > 4 * 1024 * 1024) throw new InvalidDataException("Metadata exceeds limit."); await f.FlushAsync(ct); f.Flush(true); } File.Move(temp, path, true); } finally { if (File.Exists(temp)) File.Delete(temp); } }
+    private static async Task Write<T>(string path, T value, CancellationToken ct) { Guard(path); Directory.CreateDirectory(Path.GetDirectoryName(path)!); Guard(path); var temp = path + "." + Token() + ".tmp"; try { await using (var f = new FileStream(temp, FileMode.CreateNew, FileAccess.Write, FileShare.None, 4096, FileOptions.WriteThrough)) { await JsonSerializer.SerializeAsync(f, value, Json, ct); if (f.Length > 4 * 1024 * 1024) throw new InvalidDataException("Metadata exceeds limit."); await f.FlushAsync(ct); f.Flush(true); }
+        // Windows MoveFileEx(REPLACE_EXISTING) can reject an open destination even
+        // when readers share deletion. ReplaceFile uses the compatible replacement
+        // protocol; the mutation lease guarantees only one publisher for this path.
+        if (File.Exists(path)) File.Replace(temp, path, null);
+        else File.Move(temp, path);
+        } finally { if (File.Exists(temp)) File.Delete(temp); } }
     private FileStream Lease() { var path = Guard(Path.Combine(root, "updates", "lease.lock")); Directory.CreateDirectory(Path.GetDirectoryName(path)!); return new FileStream(path, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None); }
     private FileStream AppLease() { var path = Guard(Path.Combine(root, "control", "app.instance.lock")); Directory.CreateDirectory(Path.GetDirectoryName(path)!); return new FileStream(path, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None); }
     private async Task<InstallRecord?> LoadCurrent(CancellationToken ct)
