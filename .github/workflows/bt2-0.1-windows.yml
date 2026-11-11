@@ -18,8 +18,6 @@ jobs:
   windows:
     runs-on: windows-latest
     timeout-minutes: 30
-    permissions:
-      contents: write
     outputs:
       publish_release: ${{ steps.request.outputs.publish_release }}
       version: ${{ steps.request.outputs.version }}
@@ -52,21 +50,6 @@ jobs:
       - name: Targeted tests and WPF smoke
         shell: pwsh
         run: ./tools/check-windows.ps1
-      - name: Record actual small WPF evidence on this feature branch
-        shell: pwsh
-        run: |
-          $shots = @(Get-ChildItem artifacts/0.1.2-ui -Filter *.png)
-          if ($shots.Count -lt 7 -or ($shots | Where-Object Length -gt 512000)) { throw 'Missing or oversized UI evidence' }
-          New-Item -ItemType Directory docs/0.1.2/screenshots -Force | Out-Null
-          Copy-Item artifacts/0.1.2-ui/*.png docs/0.1.2/screenshots/
-          'Actual WPF renders from smoke using disposable updater-generated receipts. Compiled source: ' + (git rev-parse HEAD) | Set-Content docs/0.1.2/screenshots/SOURCE.txt
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add docs/0.1.2/screenshots
-          git commit -m 'docs: record actual 0.1.2 Windows WPF renders'
-          if ($LASTEXITCODE -ne 0) { throw 'Could not record WPF evidence' }
-          git push origin HEAD:bt2-0.1.2-refinements
-          if ($LASTEXITCODE -ne 0) { throw 'Could not publish small UI evidence' }
       - name: Actual disposable update rollback reapply
         shell: pwsh
         run: ./tools/test-update-windows.ps1

@@ -1,4 +1,4 @@
-# Bot Toucher 2 — 0.1
+# Bot Toucher 2 — 0.1.2
 
 Windows-first WPF shell plus **one manual updater**. 0.1 adds a cohesive dark shell, Context + Hardware Monitor right rail, Home Application Info/Recent Activity, and Settings → Updates. No widget system, DLL loading, packet loading, workloads or execution/results architecture is implemented.
 
@@ -30,7 +30,7 @@ SDK bootstrap verifies the official artifact checksum before extraction. Where t
 
 ## Install and updates
 
-[Download the Windows 0.1.0 bootstrap ZIP](https://github.com/jakeisboss/bot-toucher-2/releases/download/v0.1.0/BotToucher2-0.1.0-bootstrap-win-x64.zip). Extract completely and run `bootstrap.ps1` to install and launch BT2. [Windows verification results](docs/0.1/HANDOFF.md) distinguish automated checks from remaining physical acceptance.
+[Download the Windows 0.1.2 bootstrap ZIP](https://github.com/jakeisboss/bot-toucher-2/releases/download/v0.1.2/BotToucher2-0.1.2-bootstrap-win-x64.zip). Extract completely and run `bootstrap.ps1` to install and launch BT2. [0.1.2 Windows verification results](docs/0.1.2/HANDOFF.md) distinguish automated checks from remaining physical acceptance.
 
 Compiled distribution belongs in **GitHub Release assets**, not Git history. A release bootstrap ZIP includes content-addressed assets, a full manifest and `bootstrap.ps1`. Extract the whole trusted release and run that script explicitly for a per-user non-admin install under `%LOCALAPPDATA%/BotToucher2`.
 
@@ -51,3 +51,5 @@ Rollback retains one previous known-good version before 1.0; 1.0 becomes a prote
 [Approved corrected design](docs/0.1/DESIGN.md) · [Authoritative 0.1 DoD](docs/0.1/DEFINITION-OF-DONE.md) · [BT1 inspection/reuse](docs/0.1/BT1-INSPECTION.md) · [Operating instructions](docs/0.1/OPERATING.md) · [0.1 handoff](docs/0.1/HANDOFF.md)
 
 No 0.2 work is authorized or implemented. Final verification results and every DoD status are recorded in the 0.1 handoff.
+
+0.1.2 adds receipt-backed Current / Previous known-good / Last recorded transaction cards and centralized dark navy styling. Existing 0.1.1 installs update through Settings → Updates. [0.1.2 handoff](docs/0.1.2/HANDOFF.md) · [Actual Windows client renders](docs/0.1.2/screenshots/SOURCE.txt).
