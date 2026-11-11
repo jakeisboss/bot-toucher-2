@@ -43,6 +43,12 @@ internal static class RefinementChecks
             Expect(Value(view, "PreviousVersionValue") == "0.1.1", "Rollback target comes from previous known-good receipt");
             Expect(Value(view, "LastTransactionValue").Contains("0.1.2") && Value(view, "TransactionOutcomeValue").Contains("successful"), "Committed transaction displays recorded target/outcome");
             Expect((view.FindName("RollbackButton") as Button)?.IsEnabled == true, "Rollback action enabled for actual previous version");
+            using (var held = new System.IO.FileStream(System.IO.Path.Combine(engineRoot, "install", "current.json"), System.IO.FileMode.Open, System.IO.FileAccess.Read, System.IO.FileShare.None))
+            {
+                await Reload(view, window);
+                Expect(Value(view, "CurrentVersionValue") == "Selection pending" && Value(view, "PreviousVersionValue") == "Previous state unavailable", "Busy updater state is not misreported as unmanaged/empty");
+            }
+            await Reload(view, window);
             Capture(window, "Updates-installed");
             await engine.RollbackAsync(new Launcher(true)); await Reload(view, window);
             Expect(Value(view, "CurrentVersionValue") == "0.1.1" && Value(view, "PreviousVersionValue") == "0.1.2", "UI follows real rollback selection");
@@ -67,6 +73,10 @@ internal static class RefinementChecks
             try { await interrupted.ApplyAsync(stage, new Launcher(true)); } catch (System.IO.IOException) { }
             await Reload(view, window);
             Expect((view.FindName("RollbackButton") as Button)?.IsEnabled == false && Value(view, "PreviousAvailabilityValue").Contains("Pending"), "Pending journal displays recovery state and disables rollback");
+            await engine.RecoverAsync(new Launcher(true));
+            System.IO.File.WriteAllText(System.IO.Path.Combine(engineRoot, "install", "current.json"), "{");
+            await Reload(view, window);
+            Expect(Value(view, "CurrentVersionValue") == "State unavailable" && Value(view, "PreviousVersionValue") == "Previous state unavailable", "Unreadable receipt state does not claim rollback absence");
         }
         finally { window.Close(); }
         foreach (var name in new[] { "HomeNav", "LabNav", "SettingsNav", "PacketNav", "DataNav", "HelpNav" })
@@ -121,7 +131,7 @@ internal static class RefinementChecks
         using var file = System.IO.File.Create(System.IO.Path.Combine(dir, name + ".png")); encoder.Save(file);
     }
     private sealed class Launcher(bool success) : IApplicationLauncher
-    { public bool IsRunning => true; public Task<bool> LaunchAsync(string path, string token, CancellationToken ct) => Task.FromResult(success); public Task StopAsync(CancellationToken ct) => Task.CompletedTask; }
+    { private int calls; public bool IsRunning => true; public Task<bool> LaunchAsync(string path, string token, CancellationToken ct) => Task.FromResult(success || ++calls > 1); public Task StopAsync(CancellationToken ct) => Task.CompletedTask; }
     private sealed class Assets(string input, TransitionManifest manifest) : IAssetSource
     { public Task<System.IO.Stream> OpenAsync(string name, CancellationToken ct) => Task.FromResult<System.IO.Stream>(System.IO.File.OpenRead(System.IO.Path.Combine(input, manifest.Target.First(f => f.Sha256 == name).Path))); }
 }
