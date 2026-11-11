@@ -1,0 +1,9 @@
+# BT2 0.1.2 refinement design
+
+Implements the user's supplied 0.1.2 specification from accepted 0.1.1 (`720301b`). Scope: receipt-backed installed/rollback display, centralized dark navy theme cleanup and release identity 0.1.2. No updater mutation/retention/schema changes; no launcher, packet, widget or execution systems.
+
+Keep the existing engine unchanged. `UpdateController` exposes its validated `UpdateStatus` and last entry from `GetHistoryAsync`; Updates renders Current, Previous known-good and Last transaction cards. No source version is stored in the existing bounded history, so show its recorded target, outcome, timestamp and transaction ID instead of inventing an arrow or changing persisted data. Missing/corrupt/pending state is explicit; verified means verification recorded by the updater, not a fresh payload scan. Existing rollback action and eligibility remain authoritative.
+
+Explicitly apply the Window style to derived MainWindow; central resources own normal backgrounds, default system brushes, scrollbar/thumb templates, list selection, checkboxes, separators, hover/disabled/focus states. Preserve layout/navigation. Reference BT1 navy/card/border hierarchy from inspected HomeView and Application Info/Activity components; do not reuse its widget refresh/runtime coupling or deliberately light popup styling.
+
+Validation: existing portable release/engine tests; actual Windows WPF smoke with production engine-generated state fixtures (unmanaged, committed with previous, failed transaction, rollback), palette/root/scrollbar/focus assertions, major-surface screenshots; existing real transaction/rollback proof and published 0.1.1->0.1.2 delta if published. Actual screenshot artifacts are evidence, not automatic human visual acceptance. Remaining manual checks must be marked UNVERIFIED.

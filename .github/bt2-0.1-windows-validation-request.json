@@ -1,9 +1,9 @@
 {
-  "Version": "0.1.1",
-  "PublishRelease": true,
+  "Version": "0.1.2",
+  "PublishRelease": false,
   "ReviewedSourceCommit": "177affb0a690b560a3a368f138a6842e74652057",
   "Scope": "One explicit targeted Windows validation and gated GitHub Release publication; no widget/packet/execution work.",
-  "Attempt": 12,
-  "Reason": "User requested 0.1.1 test update packet; version-only delta against exact published 0.1.0.",
-  "PreviousTag": "v0.1.0"
+  "Attempt": 1,
+  "Reason": "Observe Windows regression failures for missing installed-version cards and inherited white background before implementation.",
+  "PreviousTag": "v0.1.1"
 }

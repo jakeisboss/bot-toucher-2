@@ -90,6 +90,7 @@ internal static class Program
                 await Until(() => Descendants<TextBlock>(feed).Any(text => text.Text == "Diagnostic details must remain selected"));
                 Check(ReferenceEquals(selectedBeforeLock, list.SelectedItem), "Successful unchanged activity read clears error without rebuilding rows");
                 feedWindow.Close();
+                await RefinementChecks.RunAsync(window);
                 result = 0;
             }
             catch (Exception ex) { Console.Error.WriteLine(ex); }
