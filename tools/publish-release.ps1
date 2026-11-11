@@ -42,10 +42,15 @@ if ($PreviousManifest) {
     $metadata.Transitions = @($metadata.Transitions) + @($deltaMetadata.Transitions)
     Copy-Item (Join-Path $delta $deltaMetadata.Transitions[0].ManifestAsset) $upload
     Copy-Item (Join-Path $delta 'assets/*') $upload -Force
+    $source = Get-Content -Raw $PreviousManifest | ConvertFrom-Json
+    $packet = Join-Path $upload ('BotToucher2-' + $source.Version + '-to-' + $Version + '-update.zip')
+    Compress-Archive -Path (Join-Path $delta 'assets'),(Join-Path $delta 'transition.json') -DestinationPath $packet
+    $targetBytes = ($metadata.Transitions | Select-Object -First 1).PayloadBytes
+    [ordered]@{ SourceVersion=$source.Version; TargetVersion=$Version; SourceId=$source.TargetId; FullPayloadBytes=$targetBytes; DeltaBytes=$deltaMetadata.Transitions[0].PayloadBytes; PacketBytes=(Get-Item $packet).Length } | ConvertTo-Json | Set-Content -Encoding utf8NoBOM (Join-Path $upload 'delta-evidence.json')
 }
 $metadata | ConvertTo-Json -Depth 12 | Set-Content -Encoding utf8NoBOM (Join-Path $upload 'bt2-release.json')
 $notes = Join-Path $output 'notes.md'
-"BT2 ${Version}: shell refinements and manual updater only. Initial bootstrap ZIP is for new installs. Existing managed installs download changed/new assets only. Windows acceptance results must be recorded separately." | Set-Content $notes
+"BT2 ${Version}: version-only updater test; no new functionality. Initial bootstrap ZIP is for new installs. Existing managed installs download changed/new assets only. Windows acceptance results must be recorded separately." | Set-Content $notes
 # Keep the release hidden until every asset exists; batch short names for Windows command-line limits.
 $tag = 'v' + $Version
 & gh release create $tag --repo jakeisboss/bot-toucher-2 --target (git rev-parse HEAD) --title ('Bot Toucher 2 ' + $Version) --notes-file $notes --prerelease --draft

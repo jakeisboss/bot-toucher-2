@@ -1,8 +1,9 @@
 {
-  "Version": "0.1.0",
+  "Version": "0.1.1",
   "PublishRelease": true,
-  "ReviewedSourceCommit": "ec82808082e9cfc9c87c2e339b13693288c3d951",
+  "ReviewedSourceCommit": "177affb0a690b560a3a368f138a6842e74652057",
   "Scope": "One explicit targeted Windows validation and gated GitHub Release publication; no widget/packet/execution work.",
-  "Attempt": 11,
-  "Reason": "Correct diagnostic regex escaping; verify atomic readiness and gated release."
+  "Attempt": 12,
+  "Reason": "User requested 0.1.1 test update packet; version-only delta against exact published 0.1.0.",
+  "PreviousTag": "v0.1.0"
 }
