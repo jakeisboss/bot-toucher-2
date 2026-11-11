@@ -3,7 +3,7 @@
   "PublishRelease": false,
   "ReviewedSourceCommit": "177affb0a690b560a3a368f138a6842e74652057",
   "Scope": "One explicit targeted Windows validation and gated GitHub Release publication; no widget/packet/execution work.",
-  "Attempt": 3,
-  "Reason": "Observe busy/unreadable UI-state regressions from review; fix fake launcher fallback fixture only.",
+  "Attempt": 4,
+  "Reason": "Verify correct unknown/busy labels after native RED; retain state and theme regressions and capture WPF evidence.",
   "PreviousTag": "v0.1.1"
 }

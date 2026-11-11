@@ -70,10 +70,11 @@ public sealed class UpdatesView : UserControl
     private void ShowInstallation()
     {
         var status = _controller?.InstallationStatus;
-        _currentVersion.Text = status is null ? "State unavailable" : status.Current?.Version ?? "Not a managed install";
-        _currentState.Text = status?.Current is null ? "No installed verification receipt available" : "Installed / verification recorded";
-        _previousVersion.Text = status?.Previous?.Version ?? "No previous known-good";
-        _previousState.Text = status?.Pending == true ? "Pending transaction — rollback is unavailable" : status?.Previous is null ? "No rollback available" : status.DisplacedStateDirectory is null ? "Available for rollback; verified again before restoration" : "Retained rollback target; preserved-state requirements are checked on request";
+        var selectionUnavailable = status is null || (status.Pending && status.Current is null);
+        _currentVersion.Text = status is null ? "State unavailable" : status.Current?.Version ?? (status.Pending ? "Selection pending" : "Not a managed install");
+        _currentState.Text = status is null ? "Updater state could not be read" : status.Current is not null ? "Installed / verification recorded" : status.Pending ? "Transaction busy or pending; refresh after recovery" : "No installed verification receipt available";
+        _previousVersion.Text = selectionUnavailable ? "Previous state unavailable" : status?.Previous?.Version ?? "No previous known-good";
+        _previousState.Text = status is null ? "Updater state could not be read" : status.Pending ? "Pending transaction — rollback is unavailable" : status?.Previous is null ? "No rollback available" : status.DisplacedStateDirectory is null ? "Available for rollback; verified again before restoration" : "Retained rollback target; preserved-state requirements are checked on request";
         _rollback.Content = status?.Previous is null ? "Roll back" : "Roll back to " + status.Previous.Version;
         var last = _controller?.LastTransaction;
         _transaction.Text = _controller?.HistoryAvailable != true ? "Transaction record unavailable" : last is null ? "No transaction recorded" : "Target " + last.Version;
