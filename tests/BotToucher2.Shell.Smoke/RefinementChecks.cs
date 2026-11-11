@@ -125,7 +125,14 @@ internal static class RefinementChecks
     private static void Capture(Window window, string name)
     {
         window.UpdateLayout();
-        var bitmap = new RenderTargetBitmap((int)window.ActualWidth, (int)window.ActualHeight, 96, 96, PixelFormats.Pbgra32); bitmap.Render(window);
+        var client = (FrameworkElement)window.Content;
+        var width = Math.Max(1, (int)Math.Ceiling(client.ActualWidth)); var height = Math.Max(1, (int)Math.Ceiling(client.ActualHeight));
+        var bitmap = new RenderTargetBitmap(width, height, 96, 96, PixelFormats.Pbgra32);
+        // Window chrome is outside the WPF client. Preserve its real background
+        // beneath transparent child panels instead of producing transparent margins.
+        var background = new DrawingVisual();
+        using (var drawing = background.RenderOpen()) drawing.DrawRectangle(window.Background, null, new Rect(0, 0, width, height));
+        bitmap.Render(background); bitmap.Render(client);
         var encoder = new PngBitmapEncoder(); encoder.Frames.Add(BitmapFrame.Create(bitmap));
         var dir = System.IO.Path.GetFullPath("artifacts/0.1.2-ui"); System.IO.Directory.CreateDirectory(dir);
         using var file = System.IO.File.Create(System.IO.Path.Combine(dir, name + ".png")); encoder.Save(file);

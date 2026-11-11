@@ -1,9 +1,9 @@
 {
   "Version": "0.1.2",
-  "PublishRelease": false,
-  "ReviewedSourceCommit": "177affb0a690b560a3a368f138a6842e74652057",
-  "Scope": "One explicit targeted Windows validation and gated GitHub Release publication; no widget/packet/execution work.",
-  "Attempt": 4,
-  "Reason": "Verify correct unknown/busy labels after native RED; retain state and theme regressions and capture WPF evidence.",
+  "PublishRelease": true,
+  "ReviewedSourceCommit": "c0526131d9fbdd906e6dff7da7522fd6ad347f8a",
+  "Scope": "Only 0.1.2 UI/state refinements; preserve updater engine and policy; no packets/widgets/execution.",
+  "Attempt": 5,
+  "Reason": "Windows 121 tests, UI refinements and real transactions passed; publish exact 0.1.1->0.1.2 delta and verify published rollback/reapply.",
   "PreviousTag": "v0.1.1"
 }
