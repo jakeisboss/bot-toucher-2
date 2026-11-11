@@ -1,0 +1,1 @@
+Actual WPF renders from smoke using disposable updater-generated receipts. Compiled source: 3a2b21d5721d4d3b4fb2ca439926c2f144e57ea0
