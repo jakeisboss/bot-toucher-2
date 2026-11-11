@@ -33,6 +33,8 @@ public partial class MainWindow : Window
         };
         _settings = new SettingsView((left, right) => ApplyState(State with { LeftVisible = left, RightVisible = right }), updates);
         var applicationVersion = typeof(MainWindow).Assembly.GetName().Version?.ToString(3) ?? "Unavailable";
+        Title = "Bot Toucher 2 — " + applicationVersion;
+        VersionHeader.Text = applicationVersion + " / SHELL";
         _surfaces = new()
         {
             [Destination.Home] = new HomeView(root, activity),

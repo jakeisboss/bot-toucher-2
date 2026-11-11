@@ -11,10 +11,13 @@ public sealed class UpdateController : IDisposable
     private readonly HttpClient _http = GitHubReleaseClient.CreateHttpClient();
     private AvailableUpdate? _available;
     private UpdateStatus? _status;
+    public UpdateStatus? InstallationStatus => _status;
+    public UpdateHistoryEntry? LastTransaction { get; private set; }
+    public bool HistoryAvailable { get; private set; }
     public Action<string, string, string>? HandoffRequested { get; set; }
-    public bool CanInstall => _available is not null && _status?.Current is not null && !_status.Pending &&
+    public bool CanInstall => HistoryAvailable && _available is not null && _status?.Current is not null && !_status.Pending &&
         _available.Manifest.SourceId == _status.Current.InventoryId && _available.Manifest.SourceVersion == _status.Current.Version;
-    public bool CanRollback => _status?.Previous is not null && !_status.Pending;
+    public bool CanRollback => HistoryAvailable && _status?.Previous is not null && !_status.Pending;
     public UpdateController(string root, ActivityLog log)
     {
         _log = log;
@@ -25,7 +28,10 @@ public sealed class UpdateController : IDisposable
         try
         {
             if (operation == "check") _available = null;
+            _status = null; LastTransaction = null; HistoryAvailable = false;
             _status = await Task.Run(() => _engine.StatusAsync());
+            LastTransaction = (await Task.Run(() => _engine.GetHistoryAsync())).LastOrDefault();
+            HistoryAvailable = true;
             if (operation == "check")
             {
                 await _log.RecordAsync("UPDATE_CHECK", "Manual update check requested.");
@@ -49,8 +55,7 @@ public sealed class UpdateController : IDisposable
                 HandoffRequested(operation == "install" ? "apply" : "rollback", stage, worker);
                 return "Staging verified. Closing BT2 for the external transaction…";
             }
-            var currentVersion = _status.Current?.Version ?? ((typeof(UpdateController).Assembly.GetName().Version?.ToString(3) ?? "Unavailable") + " (unmanaged build)");
-            return $"Current version: {currentVersion}\nLatest compatible: {_available?.Manifest.Version ?? "Not checked / no compatible release"}\nRequired payload: {(_available is null ? "Not available" : _available.Manifest.RequiredBytes + " bytes")}\nPrevious known-good: {_status.Previous?.Version ?? "None"}\nDisplaced state recovery: {_status.DisplacedStateDirectory ?? "None"}\n{(_status.Pending ? "Pending transaction: run external recover before proceeding." : "")}\n\n{_available?.Notes}";
+            return $"Latest compatible: {_available?.Manifest.Version ?? "Not checked / no compatible release"}\nRequired payload: {(_available is null ? "Not available" : _available.Manifest.RequiredBytes + " bytes")}\nDisplaced state recovery: {_status.DisplacedStateDirectory ?? "None"}\n{(_status.Pending ? "Pending transaction: run external recover before proceeding." : "")}\n\n{_available?.Notes}";
         }
         catch (Exception ex)
         {

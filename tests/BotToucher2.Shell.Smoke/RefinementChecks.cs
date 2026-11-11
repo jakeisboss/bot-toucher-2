@@ -15,6 +15,7 @@ internal static class RefinementChecks
         void Expect(bool value, string message) { Console.WriteLine((value ? "PASS: " : "FAIL: ") + message); if (!value) failures.Add(message); }
         Expect((shell.Background as SolidColorBrush)?.Color == ((SolidColorBrush)shell.FindResource("Bg0")).Color, "Derived main window uses navy background");
         Expect(typeof(MainWindow).Assembly.GetName().Version?.ToString(3) == "0.1.2", "Application reports 0.1.2");
+        shell.Width = 1280; shell.Height = 800;
         var root = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "BT2-ui-state-" + Guid.NewGuid().ToString("N"));
         var input = System.IO.Path.Combine(root, "input");
         System.IO.Directory.CreateDirectory(System.IO.Path.Combine(input, "app")); System.IO.Directory.CreateDirectory(System.IO.Path.Combine(input, "engine"));
@@ -32,6 +33,8 @@ internal static class RefinementChecks
             Expect(Value(view, "LastTransactionValue") == "No transaction recorded", "Empty history has no fake events");
             var first = UpdatePlanner.CreateManifest("0.1.1", null, UpdatePlanner.Inventory(input));
             await engine.ApplyAsync(await engine.StageAsync(first, new Assets(input, first)), new Launcher(true));
+            await Reload(view, window);
+            Expect(Value(view, "PreviousVersionValue") == "No previous known-good" && (view.FindName("RollbackButton") as Button)?.IsEnabled == false, "Initial install has no fabricated rollback target");
             System.IO.File.WriteAllText(System.IO.Path.Combine(input, "app", "data"), "second");
             var second = UpdatePlanner.CreateManifest("0.1.2", first.Target, UpdatePlanner.Inventory(input), first.Version);
             await engine.ApplyAsync(await engine.StageAsync(second, new Assets(input, second)), new Launcher(true));
@@ -50,15 +53,57 @@ internal static class RefinementChecks
             await Reload(view, window);
             Expect(Value(view, "CurrentVersionValue") == "0.1.1", "Failed target does not replace installed display");
             Expect(Value(view, "LastTransactionValue").Contains("0.1.3") && Value(view, "TransactionOutcomeValue").Contains("Failed"), "Failed transaction is not presented as verified success");
+            Expect((view.FindName("RollbackButton") as Button)?.Content.ToString()?.Contains("0.1.2") == true, "Rollback action targets retained version, not last failed candidate");
+            var historyPath = System.IO.Path.Combine(engineRoot, "updates", "transactions", "history.json");
+            var history = System.IO.File.ReadAllText(historyPath);
+            System.IO.File.WriteAllText(historyPath, "{");
+            await Reload(view, window);
+            Expect(Value(view, "LastTransactionValue") == "Transaction record unavailable", "Corrupt history is unavailable, not fabricated empty/successful history");
+            Expect((view.FindName("RollbackButton") as Button)?.IsEnabled == false, "Unavailable history disables mutation frontend");
+            System.IO.File.WriteAllText(historyPath, history);
+            var pending = UpdatePlanner.CreateManifest("0.1.4", first.Target, UpdatePlanner.Inventory(input), first.Version);
+            var stage = await engine.StageAsync(pending, new Assets(input, pending));
+            var interrupted = new UpdateEngine(engineRoot, checkpoint: phase => { if (phase == "journaled") throw new System.IO.IOException("Disposable journal interruption"); });
+            try { await interrupted.ApplyAsync(stage, new Launcher(true)); } catch (System.IO.IOException) { }
+            await Reload(view, window);
+            Expect((view.FindName("RollbackButton") as Button)?.IsEnabled == false && Value(view, "PreviousAvailabilityValue").Contains("Pending"), "Pending journal displays recovery state and disables rollback");
         }
         finally { window.Close(); }
         foreach (var name in new[] { "HomeNav", "LabNav", "SettingsNav", "PacketNav", "DataNav", "HelpNav" })
         {
             ((Button)shell.FindName(name)).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
             await System.Windows.Threading.Dispatcher.Yield(System.Windows.Threading.DispatcherPriority.ApplicationIdle);
-            shell.UpdateLayout(); Capture(shell, name);
+            shell.UpdateLayout();
+            Expect(!HasDefaultBackground(shell), "No white/default-black control backgrounds on " + name);
+            Capture(shell, name);
         }
+        var scrollContent = new StackPanel();
+        for (var i = 0; i < 60; i++) scrollContent.Children.Add(new TextBlock { Text = "Scrollable row " + i, Height = 30 });
+        var scroll = new ScrollViewer { Content = scrollContent, Height = 140, Width = 300, VerticalScrollBarVisibility = ScrollBarVisibility.Visible };
+        var check = new CheckBox { Content = "Keyboard focus fixture" };
+        var controls = new StackPanel(); controls.Children.Add(scroll); controls.Children.Add(check);
+        var controlWindow = new Window { Content = controls, Width = 400, Height = 240 }; controlWindow.Show(); controlWindow.UpdateLayout();
+        scroll.ScrollToVerticalOffset(120); await System.Windows.Threading.Dispatcher.Yield(System.Windows.Threading.DispatcherPriority.ApplicationIdle);
+        Expect(scroll.VerticalOffset > 0, "Themed scroll viewer retains scrolling");
+        check.Focus(); controlWindow.UpdateLayout(); Expect(check.IsKeyboardFocused, "Themed checkbox retains keyboard focus");
+        var focusBorder = check.Template.FindName("CheckBorder", check) as Border;
+        Expect((focusBorder?.BorderBrush as SolidColorBrush)?.Color == ((SolidColorBrush)shell.FindResource("Accent")).Color, "Keyboard checkbox focus has visible cyan cue");
+        var bar = scroll.Template.FindName("PART_VerticalScrollBar", scroll) as System.Windows.Controls.Primitives.ScrollBar;
+        var offset = scroll.VerticalOffset;
+        if (bar is not null) System.Windows.Controls.Primitives.ScrollBar.PageDownCommand.Execute(null, bar);
+        await System.Windows.Threading.Dispatcher.Yield(System.Windows.Threading.DispatcherPriority.ApplicationIdle);
+        Expect(scroll.VerticalOffset > offset, "Themed scrollbar page command still scrolls content");
+        Expect((scroll.Background as SolidColorBrush)?.Color == ((SolidColorBrush)shell.FindResource("Bg0")).Color, "Scrollable content uses shared navy resource");
+        Capture(controlWindow, "Controls-focus-scroll");
+        controlWindow.Close();
         if (failures.Count > 0) throw new Exception("0.1.2 regressions: " + string.Join("; ", failures));
+    }
+    private static bool HasDefaultBackground(DependencyObject node)
+    {
+        var brush = node switch { Control control => control.Background, Border border => border.Background, Panel panel => panel.Background, _ => null };
+        if (brush is SolidColorBrush { Color.A: > 0 } solid && (solid.Color == Colors.White || solid.Color == Colors.Black)) return true;
+        for (var i = 0; i < VisualTreeHelper.GetChildrenCount(node); i++) if (HasDefaultBackground(VisualTreeHelper.GetChild(node, i))) return true;
+        return false;
     }
     private static string Value(UpdatesView view, string name) => (view.FindName(name) as TextBlock)?.Text ?? "";
     private static async Task Reload(UpdatesView view, Window window)

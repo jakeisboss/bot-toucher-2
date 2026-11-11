@@ -1,6 +1,6 @@
 #requires -Version 7.0
-# Explicit disposable proof against the real published 0.1.0 installation.
-param([Parameter(Mandatory)][string]$Updater)
+# Explicit disposable proof against the real published source installation.
+param([Parameter(Mandatory)][string]$Updater, [string]$SourceVersion = '0.1.1', [string]$TargetVersion = '0.1.2')
 $ErrorActionPreference = 'Stop'
 trap {
     $details = ($_ | Out-String) + $_.ScriptStackTrace
@@ -36,24 +36,25 @@ function Close-ProofApp {
     }
 }
 try {
-    gh release download v0.1.0 --repo jakeisboss/bot-toucher-2 --pattern BotToucher2-0.1.0-bootstrap-win-x64.zip --dir $proof
+    $zipName = 'BotToucher2-' + $SourceVersion + '-bootstrap-win-x64.zip'
+    gh release download ('v' + $SourceVersion) --repo jakeisboss/bot-toucher-2 --pattern $zipName --dir $proof
     if ($LASTEXITCODE -ne 0) { throw 'Could not download published source bootstrap' }
-    Expand-Archive (Join-Path $proof 'BotToucher2-0.1.0-bootstrap-win-x64.zip') (Join-Path $proof 'source')
+    Expand-Archive (Join-Path $proof $zipName) (Join-Path $proof 'source')
     & (Join-Path $proof 'source/bootstrap.ps1') -Root $root
     if ($LASTEXITCODE -ne 0) { throw 'Published source bootstrap failed' }
     Close-ProofApp
     $offer = Invoke-Helper check | ConvertFrom-Json
     $source = Get-Content -Raw (Join-Path $proof 'source/transition.json') | ConvertFrom-Json
     $fullBytes = ($source.Target | Measure-Object Size -Sum).Sum
-    if ($offer.Version -ne '0.1.1' -or $offer.RequiredBytes -ge $fullBytes) { throw 'Published check did not offer a smaller exact-source 0.1.1 delta' }
+    if ($offer.Version -ne $TargetVersion -or $offer.RequiredBytes -ge $fullBytes) { throw 'Published check did not offer a smaller exact-source target delta' }
     foreach ($command in @('install-release', 'rollback', 'install-release')) {
         Invoke-Helper $command | Write-Host
         $status = Invoke-Helper status | ConvertFrom-Json
-        $expected = if ($command -eq 'rollback') { '0.1.0' } else { '0.1.1' }
+        $expected = if ($command -eq 'rollback') { $SourceVersion } else { $TargetVersion }
         if ($status.Pending -or $status.Current.Version -ne $expected) { throw "Published $command did not verify $expected" }
         Close-ProofApp
     }
-    $evidence = "PASS: exact published 0.1.0 -> 0.1.1 delta, rollback and reapply; required bytes $($offer.RequiredBytes), source full bytes $fullBytes"
+    $evidence = "PASS: exact published $SourceVersion -> $TargetVersion delta, rollback and reapply; required bytes $($offer.RequiredBytes), source full bytes $fullBytes"
     Write-Host $evidence
     Write-Output "::notice title=Published delta verified::$evidence"
 } finally { Close-ProofApp }
